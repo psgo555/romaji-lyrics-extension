@@ -34,7 +34,8 @@ export function renderToggleButton(mode) {
   buttonEl.textContent = current.short;
   buttonEl.dataset.romajiToggle = current.value;
 
-  const description = `羅馬拼音:${current.label}(${current.hint})\n點一下切換到:${upcoming.label}`;
+  // label 本身就講得夠清楚了(「原文 + 下方羅馬拼音」),不需要再補一段說明
+  const description = `羅馬拼音:${current.label}\n點一下切換到:${upcoming.label}`;
   buttonEl.title = description;
   buttonEl.setAttribute('aria-label', description);
 }

@@ -135,10 +135,7 @@ body {
   outline-offset: 2px;
 }
 
-.mode-hint {
-  color: var(--muted);
-  font-size: 11px;
-}
+/* .mode-hint 拿掉了 —— label 本身已經講清楚,底下再補一行說明是廢話 */
 
 /* ---- 提前量滑桿 ---- */
 

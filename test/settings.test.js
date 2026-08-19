@@ -140,9 +140,8 @@ test('關閉時不做任何轉換', () => {
 test('每個模式都有顯示用的文字', () => {
   for (const mode of DISPLAY_MODES) {
     const info = describeMode(mode.value);
-    assert.ok(info.label, `${mode.value} 少了 label`);
-    assert.ok(info.hint, `${mode.value} 少了 hint`);
-    assert.ok(info.short, `${mode.value} 少了 short`);
+    assert.ok(info.label, `${mode.value} 少了 label`); // popup 的選項文字
+    assert.ok(info.short, `${mode.value} 少了 short`); // 頁面上那顆小按鈕的字
   }
 });
 
