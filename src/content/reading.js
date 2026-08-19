@@ -17,19 +17,15 @@
 
 import { toKana } from 'wanakana';
 
-/**
- * 讀音只接受假名與長音符 —— 混進漢字等於沒修正到。
+/*
+ * 讀音的驗證搬到 cjk.js 了 —— 那本質上是字元分類,而且那支不 import
+ * 任何東西。放在這裡的話,只想要那個判斷的模組(背景程式、共用字典驗證)
+ * 會連帶把 wanakana 一起打包進去。
  *
- * 跟 toKanaReading 放在同一支:「什麼算有效讀音」與「把輸入變成讀音」
- * 是同一件事的兩面,拆開放的話,哪天放寬了其中一邊就會對不上。
- * (原本這條在 corrections-store.js,但那支有 module-level 的 chrome 呼叫,
- *  Node 測不到 —— 而這正是最需要測的部分。)
+ * 這裡純轉手,自己沒用到,所以不需要額外的 import
+ * (若哪天這支自己要用,記得 import 與 export 兩行都要 —— 見 corrections-store)。
  */
-export const READING_PATTERN = /^[ぁ-ゟ゠-ヿー]+$/u;
-
-export function isValidReading(reading) {
-  return READING_PATTERN.test(reading ?? '');
-}
+export { READING_PATTERN, isValidReading } from './cjk.js';
 
 /**
  * 把輸入轉成假名。

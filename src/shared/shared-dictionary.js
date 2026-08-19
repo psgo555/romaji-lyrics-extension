@@ -19,8 +19,8 @@
  * 這支不碰 chrome 也不碰網路,純資料驗證,可以直接用 Node 測。
  */
 
-import { isValidReading } from '../content/reading.js';
-import { isIterationMarkOnly } from '../content/cjk.js';
+// 直接跟 cjk 拿:繞經 reading.js 會把 wanakana 一起拖進背景程式
+import { isValidReading, isIterationMarkOnly } from '../content/cjk.js';
 
 /** 認得的格式版本。改格式時一起改這裡,舊版擴充功能會自動忽略新格式。 */
 export const SUPPORTED_VERSION = 1;

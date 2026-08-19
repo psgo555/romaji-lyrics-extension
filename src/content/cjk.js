@@ -141,6 +141,22 @@ export function stripIterationMarks(text) {
     .trim();
 }
 
+/**
+ * 讀音只接受假名與長音符 —— 混進漢字等於沒修正到。
+ *
+ * 放在這裡是因為它本質上就是字元分類(「這串是不是全部都是假名」),
+ * 跟這支檔案其他判斷是同一類問題。
+ *
+ * 而且這支**不 import 任何東西**,所以背景程式、共用字典的驗證
+ * 都可以只拿這一個判斷,不會連帶把整個羅馬拼音轉換工具打包進去。
+ * (先前它跟 toKanaReading 放在一起,害 service worker 從 3.4kb 變成 14.3kb。)
+ */
+export const READING_PATTERN = /^[ぁ-ゟ゠-ヿー]+$/u;
+
+export function isValidReading(reading) {
+  return READING_PATTERN.test(reading ?? '');
+}
+
 /** 這段文字裡有沒有需要轉換的日文? */
 export function hasJapanese(text) {
   return JP_RE.test(text);
