@@ -36,12 +36,20 @@ const listeners = new Set();
 /*
  * 讀音的驗證搬到 reading.js 了 —— 跟「把輸入轉成假名」放在一起,
  * 那兩件事是同一個問題的兩面,拆開放的話放寬了其中一邊就會對不上。
- *
- * 另一個原因:這支檔案有 module-level 的 chrome 呼叫,Node 測不到,
+ * 另一個原因:這支檔案有 module-level 的 chrome 呼叫、Node 測不到,
  * 而讀音驗證正是最需要測的部分。
  *
- * 這裡原樣再匯出一次,既有的呼叫端一行都不用改。
+ * 注意這裡是**兩行**,不是一行。
+ *
+ * `export { x } from './y.js'` 只是把 x 轉給別的模組用,**不會**在這支檔案裡
+ * 建立一個叫 x 的名字。下面 addUserCorrection 自己要呼叫 isValidReading,
+ * 所以還需要一個真正的 import。
+ *
+ * 少了 import 那行的症狀:打包不報錯、載入也不報錯,一路要到使用者
+ * 真的按下儲存才炸 ReferenceError —— 而且畫面上只會顯示「存不了」。
+ * (這就是它上線的方式,不是假設。)
  */
+import { isValidReading } from './reading.js';
 export { READING_PATTERN, isValidReading } from './reading.js';
 
 /** 內建的 + 使用者的,同一個原文以使用者的為準 */

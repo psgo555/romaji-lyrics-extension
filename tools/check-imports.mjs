@@ -140,6 +140,33 @@ function parseExports(code) {
   return names;
 }
 
+/**
+ * 只是「轉手」出去、本地其實不存在的名字。
+ *
+ *   export { x } from './y.js';   ← 給別的模組用,但**這支檔案裡沒有 x**
+ *   export { x };                 ← x 是本地定義的,這支檔案裡有
+ *
+ * 兩者在 parseExports 眼裡長得一樣。分不出來就會漏掉一整類錯誤:
+ * 只寫了轉手那行、自己卻也在用那個名字。那種錯誤打包不報、載入不報,
+ * 要到執行到那一行才炸 ReferenceError。
+ *
+ * (這不是假設 —— corrections-store.js 就是這樣把「按儲存沒反應」
+ *  送上線的,而當時這支掃描器回報乾淨。)
+ */
+function parseReExports(code) {
+  const names = new Set();
+  for (const m of code.matchAll(/\bexport\s*\{([^}]*)\}\s*from\s*['"]/g)) {
+    for (const part of m[1].split(',')) {
+      const piece = part.trim();
+      if (!piece) continue;
+      const as = piece.split(/\s+as\s+/);
+      // 有 as 的話對外叫 as 後面那個,但本地一樣沒有這個名字
+      names.add((as[1] ?? as[0]).trim());
+    }
+  }
+  return names;
+}
+
 /** 這支模組 import 進來哪些名字 */
 function parseImports(code) {
   const names = new Set();
@@ -272,6 +299,7 @@ for (const file of files) {
   const code = stripNoise(readFileSync(file, 'utf8'));
   parsed.set(file, {
     exports: parseExports(code),
+    reExports: parseReExports(code),
     imports: parseImports(code),
     locals: parseLocalDeclarations(code),
     used: parseUsedIdentifiers(blankImportStatements(code)),
@@ -293,7 +321,8 @@ for (const [file, info] of parsed) {
   const findings = [];
   for (const [name, line] of info.used) {
     if (!exportOwners.has(name)) continue;  // 不是任何模組的 export
-    if (info.exports.has(name)) continue;   // 自己就是 export 者
+    // 「自己就是 export 者」要排除純轉手的:export { x } from 不會建立本地的 x
+    if (info.exports.has(name) && !info.reExports.has(name)) continue;
     if (info.imports.has(name)) continue;   // 有好好 import
     if (info.locals.has(name)) continue;    // 本地有宣告(同名但無關)
     const owners = exportOwners.get(name).filter((f) => f !== file);
