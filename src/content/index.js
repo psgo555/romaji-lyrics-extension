@@ -60,6 +60,8 @@ import {
   normalizeMode,
   normalizeOffset,
   normalizeSweepMs,
+  normalizeSweepSpeed,
+  applySweepSpeed,
   nextMode,
 } from '../shared/settings.js';
 
@@ -140,6 +142,9 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
   if (changes.sweepMsPerLetter) {
     settings.sweepMsPerLetter = normalizeSweepMs(changes.sweepMsPerLetter.newValue);
+  }
+  if (changes.sweepSpeed) {
+    settings.sweepSpeed = normalizeSweepSpeed(changes.sweepSpeed.newValue);
   }
 
   if (!changes.displayMode) return;
@@ -919,6 +924,8 @@ function updateActiveLine() {
       updateLrcPanel(raw === null ? null : raw + settings.syncOffsetMs, {
         spanFactor: SWEEP_SPAN_FACTOR,
         sweepMsPerLetter: settings.sweepMsPerLetter,
+        // 面板也要吃使用者的快慢設定,否則同一個滑桿在兩個地方行為不一致
+        sweepSpeed: settings.sweepSpeed,
       });
     }
     return;
@@ -960,6 +967,14 @@ function updateActiveLine() {
       });
     }
   }
+
+  /*
+   * 使用者的快慢倍率套在最後 —— 上面兩條路(真資料 / 估算)算完都會經過這裡。
+   *
+   * 刻意放在出口:先前只有估算那條路吃得到使用者的設定,有逐字時間軸的歌
+   * 完全不理會,拉滑桿一動也不動、也沒有任何提示。放在這裡就沒有死角。
+   */
+  progress = applySweepSpeed(progress, settings.sweepSpeed);
 
   lines.forEach((el, i) => {
     if (i === active) {

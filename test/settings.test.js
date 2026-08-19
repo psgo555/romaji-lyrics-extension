@@ -23,6 +23,10 @@ import {
   SYNC_OFFSET_MIN,
   SYNC_OFFSET_MAX,
   SWEEP_MS_MIN,
+  SWEEP_SPEED_MIN,
+  SWEEP_SPEED_MAX,
+  normalizeSweepSpeed,
+  applySweepSpeed,
   SWEEP_MS_MAX,
 } from '../src/shared/settings.js';
 
@@ -85,6 +89,49 @@ test('0.5 秒為單位的加減不會衝出範圍', () => {
   // 快到邊界時要被夾住,不可以溢出
   assert.equal(nudge(-300, -500), SYNC_OFFSET_MIN);
   assert.equal(nudge(1800, 500), SYNC_OFFSET_MAX);
+});
+
+test('掃描快慢:100% 不改變進度', () => {
+  assert.equal(applySweepSpeed(0.5, 100), 0.5);
+  assert.equal(applySweepSpeed(0, 100), 0);
+  assert.equal(applySweepSpeed(1, 100), 1);
+});
+
+test('掃描快慢:調快會提早掃完,調慢會拖長', () => {
+  assert.equal(applySweepSpeed(0.5, 200), 1); // 快一倍 → 半路就掃完
+  assert.equal(applySweepSpeed(0.5, 50), 0.25); // 慢一半
+});
+
+test('掃描快慢:結果一定夾在 0~1,不可以衝出這一行', () => {
+  assert.equal(applySweepSpeed(0.9, 200), 1);
+  assert.ok(applySweepSpeed(0.99, 200) <= 1);
+  assert.ok(applySweepSpeed(0.01, 50) >= 0);
+});
+
+test('掃描快慢:沒有進度時保持沒有(不要假裝有資料)', () => {
+  assert.equal(applySweepSpeed(null, 150), null);
+});
+
+test('掃描快慢:認不得的值退回預設,而且範圍會夾住', () => {
+  assert.equal(normalizeSweepSpeed('abc'), DEFAULTS.sweepSpeed);
+  assert.equal(normalizeSweepSpeed(9999), SWEEP_SPEED_MAX);
+  assert.equal(normalizeSweepSpeed(0), SWEEP_SPEED_MIN);
+  // 壞掉的設定不可以讓進度變成 NaN —— 那會讓整行高亮消失
+  assert.ok(Number.isFinite(applySweepSpeed(0.5, 'abc')));
+});
+
+test('掃描快慢:每一段調整都要真的改變結果(這正是加這個設定的原因)', () => {
+  /*
+   * 先前的 sweepMsPerLetter 只在「沒有逐字時間軸」的歌上有效,
+   * 有逐字資料的歌完全不理會 —— 使用者拉滑桿畫面一動也不動。
+   * 這個倍率是套在最後算好的進度上的,所以任何情況下調了都必須有反應。
+   */
+  const progress = 0.4;
+  const seen = new Set();
+  for (const speed of [50, 75, 100, 125, 150]) {
+    seen.add(applySweepSpeed(progress, speed));
+  }
+  assert.equal(seen.size, 5, '不同的倍率必須算出不同的結果');
 });
 
 test('掃描速度夾在合理範圍內', () => {

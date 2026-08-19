@@ -30,6 +30,7 @@ import {
   buildWordCurve,
   paintSweep,
 } from './sync-highlight.js';
+import { applySweepSpeed } from '../shared/settings.js';
 
 const LOG = '[romaji]';
 
@@ -237,6 +238,10 @@ export function updateLrcPanel(positionMs, options = {}) {
       });
     }
   }
+
+  // 跟 index.js 的 updateActiveLine 一樣,倍率套在出口,兩條路都吃得到。
+  // 少了這行,同一個滑桿在 Spotify 歌詞上有效、在這個面板上卻沒反應。
+  progress = applySweepSpeed(progress, options.sweepSpeed);
 
   lineEls.forEach((el, i) => {
     if (i === active) {

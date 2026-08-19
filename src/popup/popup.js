@@ -9,7 +9,7 @@ import {
   setSetting,
   normalizeMode,
   normalizeOffset,
-  normalizeSweepMs,
+  normalizeSweepSpeed,
   DISPLAY_MODES,
 } from '../shared/settings.js';
 
@@ -74,9 +74,10 @@ function renderOffset(value) {
   offsetValueEl.textContent = `${value > 0 ? '+' : ''}${value} ms`;
 }
 
+/** 掃描快慢是倍率,顯示成「100%」比毫秒好懂 */
 function renderSweep(value) {
   sweepEl.value = String(value);
-  sweepValueEl.textContent = `${value} ms/字`;
+  sweepValueEl.textContent = `${value}%`;
 }
 
 /*
@@ -119,12 +120,26 @@ for (const id of ['offset-later', 'offset-earlier']) {
 }
 
 sweepEl.addEventListener('input', () => {
-  const value = normalizeSweepMs(sweepEl.value);
+  const value = normalizeSweepSpeed(sweepEl.value);
   renderSweep(value);
-  setSetting('sweepMsPerLetter', value).catch((err) =>
-    console.warn('[romaji] 寫入掃描速度失敗:', err)
+  setSetting('sweepSpeed', value).catch((err) =>
+    console.warn('[romaji] 寫入掃描快慢失敗:', err)
   );
 });
+
+/* 以 10% 為單位的加減,跟提前量那組同一個道理:滑桿難對準,按鈕才好用 */
+function nudgeSweep(delta) {
+  const value = normalizeSweepSpeed(Number(sweepEl.value) + delta);
+  renderSweep(value);
+  setSetting('sweepSpeed', value).catch((err) =>
+    console.warn('[romaji] 寫入掃描快慢失敗:', err)
+  );
+}
+
+for (const id of ['sweep-slower', 'sweep-faster']) {
+  const button = document.getElementById(id);
+  button.addEventListener('click', () => nudgeSweep(Number(button.dataset.delta)));
+}
 
 /* ------------------------------------------------------------ 自訂讀音 */
 
@@ -255,7 +270,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'sync') return;
   if (changes.displayMode) renderModes(normalizeMode(changes.displayMode.newValue));
   if (changes.syncOffsetMs) renderOffset(normalizeOffset(changes.syncOffsetMs.newValue));
-  if (changes.sweepMsPerLetter) renderSweep(normalizeSweepMs(changes.sweepMsPerLetter.newValue));
+  if (changes.sweepSpeed) renderSweep(normalizeSweepSpeed(changes.sweepSpeed.newValue));
 });
 
 /*
@@ -273,10 +288,10 @@ onCorrectionsChanged((entries) => {
 });
 
 async function main() {
-  const { displayMode, syncOffsetMs, sweepMsPerLetter } = await getSettings();
+  const { displayMode, syncOffsetMs, sweepSpeed } = await getSettings();
   renderModes(displayMode);
   renderOffset(syncOffsetMs);
-  renderSweep(sweepMsPerLetter);
+  renderSweep(sweepSpeed);
 
   renderCorrections(await loadUserCorrections());
 }
