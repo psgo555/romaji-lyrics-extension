@@ -87,12 +87,37 @@ function renderOffset(value) {
  * 這樣使用者可以一邊播一邊拖,即時看到對不對得上。
  * content script 那邊是靠 storage.onChanged 立即套用的。
  */
+/*
+ * 拖曳過程中寫入要節流。
+ *
+ * chrome.storage.sync 有每分鐘約 120 次的寫入上限,超過之後**接下來所有
+ * 寫入都會失敗** —— 包括別的功能。而滑桿拖一次會連發幾十個 input 事件,
+ * 幾秒鐘就能把額度用光,然後使用者去存自訂讀音就會莫名其妙失敗。
+ * (實際發生過:拖滑桿調整之後,補讀音按儲存沒反應。)
+ *
+ * 這個陷阱在自訂讀音的輸入框已經避開了(那裡用 change 不用 input),
+ * 但滑桿當初漏掉,踩了同一個坑。
+ *
+ * 畫面**立刻**更新、只有寫入延後 —— 拖的時候還是即時看得到數字,
+ * 停手 250ms 才真的寫進去。content script 是靠 storage.onChanged 套用的,
+ * 所以實際效果會慢那一下下,對「一邊播一邊對準」完全不影響。
+ */
+const WRITE_DEBOUNCE_MS = 250;
+let offsetWriteTimer = null;
+
+function saveOffsetSoon(value) {
+  clearTimeout(offsetWriteTimer);
+  offsetWriteTimer = setTimeout(() => {
+    setSetting('syncOffsetMs', value).catch((err) =>
+      console.warn('[romaji] 寫入提前量失敗:', err)
+    );
+  }, WRITE_DEBOUNCE_MS);
+}
+
 offsetEl.addEventListener('input', () => {
   const value = normalizeOffset(offsetEl.value);
   renderOffset(value);
-  setSetting('syncOffsetMs', value).catch((err) =>
-    console.warn('[romaji] 寫入提前量失敗:', err)
-  );
+  saveOffsetSoon(value);
 });
 
 /*
@@ -111,9 +136,8 @@ offsetEl.addEventListener('input', () => {
 function nudgeOffset(deltaMs) {
   const value = normalizeOffset(Number(offsetEl.value) + deltaMs);
   renderOffset(value);
-  setSetting('syncOffsetMs', value).catch((err) =>
-    console.warn('[romaji] 寫入提前量失敗:', err)
-  );
+  // 按鈕也走節流那條:使用者可能連按好幾下對準,那一樣是連續寫入
+  saveOffsetSoon(value);
 }
 
 for (const id of ['offset-later', 'offset-earlier']) {
