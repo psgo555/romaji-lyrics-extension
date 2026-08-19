@@ -1,0 +1,26 @@
+{
+  "name": "romaji-lyrics-extension",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Chrome 擴充功能:在 Spotify 網頁版的日文歌詞下方顯示羅馬拼音",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "check:imports": "node tools/check-imports.mjs src",
+    "test": "node --test test/*.test.js",
+    "_comment_demo": "以下三支是目視用的示範腳本,不是測試 —— 它們只把結果印出來、沒有任何斷言,讀音轉錯也一樣 exit 0。真正的驗證在 npm test。",
+    "demo:kana": "node legacy/test.cjs",
+    "demo:kanji": "node legacy/test-kanji.cjs",
+    "demo:corrections": "node legacy/test-corrections.js"
+  },
+  "dependencies": {
+    "kuroshiro": "^1.2.0",
+    "kuroshiro-analyzer-kuromoji": "^1.1.0",
+    "wanakana": "^5.3.1"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "path-browserify": "^1.0.1"
+  }
+}
