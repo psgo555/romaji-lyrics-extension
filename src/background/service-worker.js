@@ -254,6 +254,20 @@ const DICTIONARY_KEY = 'sharedDictionary';
 const DICTIONARY_TTL_MS = 12 * 60 * 60 * 1000; // 12 小時
 const DICTIONARY_CACHE_VERSION = 1;
 
+/*
+ * 安裝、更新、或(開發時)按下「重新載入擴充功能」都會把快取丟掉,
+ * 下一次就會重新抓一份。
+ *
+ * 為什麼需要:12 小時的快取對一般使用者剛好,但對**剛改完字典的人**
+ * 完全不合直覺 —— 他改了檔案、重新載入了擴充功能,畫面卻沒變,
+ * 而且沒有任何跡象告訴他是快取的關係。實際踩過這一次。
+ *
+ * 重新載入本來就是「我要看最新狀態」的意思,快取不該活過那個動作。
+ */
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.storage.local.remove(DICTIONARY_KEY).catch(() => {});
+});
+
 /**
  * 取得共用字典。先看快取,過期才連網。
  *
