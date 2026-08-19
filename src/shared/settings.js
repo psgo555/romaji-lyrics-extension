@@ -113,8 +113,8 @@ export function normalizeOffset(value) {
  */
 export const DISPLAY_MODES = [
   { value: 'romaji-only', label: '純羅馬拼音', short: '拼' },
-  { value: 'both', label: '原文 + 下方羅馬拼音', short: '拼日' },
-  { value: 'kana', label: '原文 + 平假名讀音', short: '假名' },
+  { value: 'both', label: '日 + 羅馬拼音', short: '拼日' },
+  { value: 'kana', label: '日 + 平假名', short: '假名' },
   { value: 'off', label: '關閉', short: '關' },
 ];
 

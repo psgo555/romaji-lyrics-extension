@@ -22,6 +22,7 @@
 
 import { addUserCorrection, isValidReading } from './corrections-store.js';
 import { previewRomaji } from './romaji.js';
+import { toKanaReading } from './reading.js';
 
 const PREVIEW_DEBOUNCE_MS = 200;
 const PANEL_WIDTH = 320;
@@ -44,7 +45,9 @@ function buildSkeleton() {
     <p class="romaji-fix-hint">點原文可調整範圍,要涵蓋<b>整個詞</b>才不會斷錯</p>
     <div class="romaji-fix-source" role="group" aria-label="選擇要修正的範圍"></div>
     <input class="romaji-fix-input" type="text"
-           placeholder="輸入假名讀音,例如 えんこ" aria-label="讀音(假名)" />
+           placeholder="打羅馬拼音就好,例如 shin no zou"
+           aria-label="讀音(可填假名或羅馬拼音)" />
+    <p class="romaji-fix-kana" aria-live="polite"></p>
     <p class="romaji-fix-error" role="alert"></p>
     <div class="romaji-fix-preview">
       <span class="romaji-fix-preview-label">預覽</span>
@@ -109,9 +112,14 @@ function schedulePreview() {
 async function runPreview() {
   if (!rootEl) return;
 
-  const reading = q('.romaji-fix-input').value.trim();
+  // 使用者可能打的是羅馬拼音,先轉成假名再判斷
+  const reading = toKanaReading(q('.romaji-fix-input').value);
   const surface = selectedSurface();
   const candidate = reading && isValidReading(reading) ? { surface, reading } : null;
+
+  // 把轉出來的假名顯示出來 —— 打羅馬拼音的人要看到它變成什麼,
+  // 否則轉錯了也不知道是哪一步出問題
+  q('.romaji-fix-kana').textContent = candidate ? reading : '';
 
   const result = await previewRomaji(state.lineText, candidate);
   if (!rootEl) return; // 等待期間被關掉了
@@ -126,10 +134,12 @@ function showError(message) {
 /* -------------------------------------------------------------- 存檔 */
 
 async function save() {
-  const reading = q('.romaji-fix-input').value.trim();
+  // 跟預覽走同一條路:先轉假名再驗證。兩邊若不一致,
+  // 會出現「預覽看起來對、按儲存卻說格式錯」這種莫名其妙的狀況。
+  const reading = toKanaReading(q('.romaji-fix-input').value);
 
   if (!isValidReading(reading)) {
-    showError('讀音只能是假名(例如 えんこ),不要輸入漢字或英文');
+    showError('讀音請填假名或羅馬拼音,例如 しんのぞう 或 shin no zou');
     return;
   }
 
