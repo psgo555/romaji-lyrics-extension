@@ -10,6 +10,9 @@ import {
   normalizeMode,
   normalizeOffset,
   describeOffset,
+  SYNC_OFFSET_MIN,
+  SYNC_OFFSET_MAX,
+  SYNC_OFFSET_STEP,
   DISPLAY_MODES,
 } from '../shared/settings.js';
 
@@ -52,11 +55,7 @@ function renderModes(current) {
     label.className = 'mode-label';
     label.textContent = mode.label;
 
-    const hint = document.createElement('span');
-    hint.className = 'mode-hint';
-    hint.textContent = mode.hint;
-
-    button.append(label, hint);
+    button.append(label);
     button.addEventListener('click', async () => {
       renderModes(mode.value); // 先更新畫面,不等 storage 寫完
       await setSetting('displayMode', mode.value);
@@ -65,6 +64,17 @@ function renderModes(current) {
     modesEl.appendChild(button);
   }
 }
+
+/*
+ * 滑桿的範圍與刻度從 settings.js 帶進來,HTML 裡不寫死。
+ *
+ * 那三個數字跟 normalizeOffset 夾範圍用的是同一組;寫兩份的話,改了 HTML
+ * 卻忘了改 settings.js 就會變成「滑桿拉得到 3000,存進去被砍回 2000」——
+ * 畫面顯示跟實際生效不一致,而且不會有任何錯誤訊息。
+ */
+offsetEl.min = String(SYNC_OFFSET_MIN);
+offsetEl.max = String(SYNC_OFFSET_MAX);
+offsetEl.step = String(SYNC_OFFSET_STEP);
 
 /** 存的是毫秒,顯示成「提早 0.9 秒」—— 沒人在讀毫秒的 */
 function renderOffset(value) {

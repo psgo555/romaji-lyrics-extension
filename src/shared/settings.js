@@ -57,9 +57,17 @@ export const DEFAULTS = {
  * 所以:能調的只有「早或晚」,不該有「快或慢」。
  */
 
-/** 提前量的合理範圍,超出多半是誤操作 */
+/*
+ * 提前量的合理範圍與刻度,超出多半是誤操作。
+ *
+ * popup 的滑桿**不要**自己在 HTML 裡寫一次 min/max/step —— 那樣同一組數字
+ * 會有兩份,改了其中一邊就會出現「滑桿拉得到 3000、存進去卻被砍回 2000,
+ * 畫面顯示跟實際生效不一致」而且完全不噴錯。
+ * popup.js 啟動時會拿這三個值去設定滑桿。
+ */
 export const SYNC_OFFSET_MIN = -500;
 export const SYNC_OFFSET_MAX = 2000;
+export const SYNC_OFFSET_STEP = 50;
 
 /** 掃描速度的合理範圍。太小會整句瞬間掃完,太大則永遠掃不到句尾 */
 export const SWEEP_MS_MIN = 60;
@@ -104,10 +112,10 @@ export function normalizeOffset(value) {
  * short 是按鈕上顯示的縮寫,popup 用 label + hint。
  */
 export const DISPLAY_MODES = [
-  { value: 'romaji-only', label: '純羅馬拼音', hint: '隱藏原文,只顯示拼音', short: '拼' },
-  { value: 'both', label: '原文 + 下方羅馬拼音', hint: '兩者都顯示', short: '拼日' },
-  { value: 'kana', label: '原文 + 平假名讀音', hint: '只把漢字的讀音標出來', short: '假名' },
-  { value: 'off', label: '關閉', hint: '只顯示原文日文,不做轉換', short: '關' },
+  { value: 'romaji-only', label: '純羅馬拼音', short: '拼' },
+  { value: 'both', label: '原文 + 下方羅馬拼音', short: '拼日' },
+  { value: 'kana', label: '原文 + 平假名讀音', short: '假名' },
+  { value: 'off', label: '關閉', short: '關' },
 ];
 
 const VALID_MODES = new Set(DISPLAY_MODES.map((mode) => mode.value));

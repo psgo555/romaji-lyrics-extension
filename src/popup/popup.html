@@ -22,7 +22,8 @@
     <label class="field-label" for="offset">
       延遲校正 <output class="field-value" id="offset-value"></output>
     </label>
-    <input class="slider" type="range" id="offset" min="-500" max="2000" step="50" aria-describedby="offset-hint" />
+    <!-- min/max/step 由 popup.js 從 settings.js 帶入,不在這裡寫死第二份 -->
+    <input class="slider" type="range" id="offset" aria-describedby="offset-hint" />
     <div class="nudge" role="group" aria-label="以 0.5 秒為單位調整提前量">
       <button type="button" class="nudge-btn" id="offset-later" data-delta="-500">
         − 0.5 秒
@@ -42,10 +43,6 @@
     </span>
     <ul class="corrections" id="corrections"></ul>
     <p class="field-error" id="corrections-error" role="alert"></p>
-    <!--
-        「這裡可以改讀音或刪掉」是多餘的 —— 每一列本來就有輸入框和叉叉,
-        看到就知道。只留使用者**猜不到**的那件事:要去哪裡新增。
-      -->
     <p class="field-hint">在歌詞上點紅色波浪底線的字可新增,只接受假名</p>
   </section>
 
