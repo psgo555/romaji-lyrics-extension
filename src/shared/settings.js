@@ -36,6 +36,24 @@ export const DEFAULTS = {
    * 放諸四海皆準的數字,不如讓使用者一邊播一邊拖到看起來對為止。
    */
   sweepMsPerLetter: 180,
+
+  /**
+   * 掃描快慢的倍率(百分比,100 = 原速)。
+   *
+   * 為什麼還要這個 —— sweepMsPerLetter 不是已經在調速度了嗎?
+   *
+   * 因為那個值**只在「這首歌沒有逐字時間軸」時才會被用到**。
+   * 有逐字資料的歌走的是 progressFromCurve(真資料),那條路上
+   * sweepMsPerLetter 完全不參與 —— 使用者拉了半天滑桿,畫面一動也不動,
+   * 而且沒有任何提示告訴他為什麼。
+   *
+   * 這個倍率是**套在算完的進度上**的,兩條路都會經過,所以
+   * 「太快就調慢、太慢就調快」在任何歌上都保證有反應。
+   *
+   * 真資料本來就準,預設 100 不動它;會想調的人是因為自己的延遲跟
+   * 別人不一樣 —— 那正是這個設定存在的意義。
+   */
+  sweepSpeed: 100,
 };
 
 /** 提前量的合理範圍,超出多半是誤操作 */
@@ -45,6 +63,28 @@ export const SYNC_OFFSET_MAX = 2000;
 /** 掃描速度的合理範圍。太小會整句瞬間掃完,太大則永遠掃不到句尾 */
 export const SWEEP_MS_MIN = 60;
 export const SWEEP_MS_MAX = 320;
+
+/** 掃描快慢的範圍。50% = 慢一半,200% = 快一倍 */
+export const SWEEP_SPEED_MIN = 50;
+export const SWEEP_SPEED_MAX = 200;
+
+export function normalizeSweepSpeed(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return DEFAULTS.sweepSpeed;
+  return Math.min(SWEEP_SPEED_MAX, Math.max(SWEEP_SPEED_MIN, Math.round(number)));
+}
+
+/**
+ * 把倍率套到算好的進度上。0~1 的範圍要夾住,否則掃描會衝出這一行。
+ *
+ * 兩條路(真資料 / 估算)算完都經過這裡,所以使用者調了一定有反應 ——
+ * 這正是加這個設定的目的。
+ */
+export function applySweepSpeed(progress, speed) {
+  if (progress === null) return null;
+  const factor = normalizeSweepSpeed(speed) / 100;
+  return Math.min(1, Math.max(0, progress * factor));
+}
 
 export function normalizeSweepMs(value) {
   const number = Number(value);
@@ -124,6 +164,7 @@ export async function getSettings() {
     displayMode: normalizeMode(stored.displayMode),
     syncOffsetMs: normalizeOffset(stored.syncOffsetMs),
     sweepMsPerLetter: normalizeSweepMs(stored.sweepMsPerLetter),
+    sweepSpeed: normalizeSweepSpeed(stored.sweepSpeed),
   };
 }
 
