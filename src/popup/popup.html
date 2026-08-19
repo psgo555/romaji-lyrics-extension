@@ -29,8 +29,20 @@
         step="50"
         aria-describedby="offset-hint"
       />
+      <div class="nudge" role="group" aria-label="以 0.5 秒為單位調整提前量">
+        <button type="button" class="nudge-btn" id="offset-later" data-delta="-500">
+          − 0.5 秒
+          <span class="nudge-sub">亮得晚一點</span>
+        </button>
+        <button type="button" class="nudge-btn" id="offset-earlier" data-delta="500">
+          ＋ 0.5 秒
+          <span class="nudge-sub">亮得早一點</span>
+        </button>
+      </div>
       <p class="field-hint" id="offset-hint">
-        高亮比歌聲慢就往右拉,太早就往左拉。一邊播一邊調,馬上看得到效果。
+        <strong>覺得太早亮就按左邊,太慢就按右邊。</strong>
+        按鈕一次動 0.5 秒;上面的滑桿可以再微調(一格 0.05 秒)。
+        一邊播一邊調,馬上看得到效果。
       </p>
     </section>
 

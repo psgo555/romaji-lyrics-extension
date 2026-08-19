@@ -67,6 +67,26 @@ test('提前量一律取整數', () => {
   assert.ok(Number.isInteger(normalizeOffset('123.4')));
 });
 
+test('0.5 秒為單位的加減不會衝出範圍', () => {
+  /*
+   * popup 那兩顆按鈕的行為就是「目前值 ± 500 再正規化」。
+   * 這裡把那個算式測起來,重點是**到邊界要停住** ——
+   * 連按到底時若沒夾住,會存進超出範圍的值,而高亮會整個跑掉。
+   */
+  const nudge = (current, delta) => normalizeOffset(Number(current) + delta);
+
+  assert.equal(nudge(900, -500), 400);
+  assert.equal(nudge(900, 500), 1400);
+
+  // 已經在邊界上再按,要停在原地
+  assert.equal(nudge(SYNC_OFFSET_MIN, -500), SYNC_OFFSET_MIN);
+  assert.equal(nudge(SYNC_OFFSET_MAX, 500), SYNC_OFFSET_MAX);
+
+  // 快到邊界時要被夾住,不可以溢出
+  assert.equal(nudge(-300, -500), SYNC_OFFSET_MIN);
+  assert.equal(nudge(1800, 500), SYNC_OFFSET_MAX);
+});
+
 test('掃描速度夾在合理範圍內', () => {
   assert.equal(normalizeSweepMs(9999), SWEEP_MS_MAX);
   assert.equal(normalizeSweepMs(0), SWEEP_MS_MIN);
