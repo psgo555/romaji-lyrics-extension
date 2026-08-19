@@ -14,6 +14,7 @@ import {
   findUnromanized,
   findUnreadKanji,
   toLetterRanges,
+  isIterationMarkOnly,
 } from '../src/content/cjk.js';
 
 test('平假名、片假名、漢字都算日文', () => {
@@ -79,4 +80,26 @@ test('字串位置要換算成字母索引(空白被拿掉了)', () => {
 test('沒有範圍時 toLetterRanges 回空陣列', () => {
   assert.deepEqual(toLetterRanges('abc', []), []);
   assert.deepEqual(toLetterRanges('abc', null), []);
+});
+
+/* ------------------------------------------------- 疊字符 */
+
+test('疊字符單獨出現時要被認出來', () => {
+  // 它讀什麼取決於前一個字,不能單獨補讀音
+  assert.equal(isIterationMarkOnly('々'), true);
+  assert.equal(isIterationMarkOnly('ゝ'), true);
+  assert.equal(isIterationMarkOnly('ヾ'), true);
+  assert.equal(isIterationMarkOnly('〃'), true);
+});
+
+test('疊字符跟前面的字一起選就是有效的範圍', () => {
+  assert.equal(isIterationMarkOnly('時々'), false);
+  assert.equal(isIterationMarkOnly('人々'), false);
+  assert.equal(isIterationMarkOnly('時時々'), false);
+});
+
+test('一般文字不是疊字符', () => {
+  assert.equal(isIterationMarkOnly('漢字'), false);
+  assert.equal(isIterationMarkOnly(''), false);
+  assert.equal(isIterationMarkOnly(null), false);
 });

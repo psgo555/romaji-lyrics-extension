@@ -130,3 +130,20 @@ test('專案裡的 dictionary.json 本身是合法的', () => {
   assert.equal(skipped, 0, '有條目沒通過驗證,檢查 dictionary.json');
   assert.ok(entries.length > 0, 'dictionary.json 不該是空的');
 });
+
+test('只有疊字符的條目擋下來(資料層也要擋,不能只靠面板)', () => {
+  /*
+   * 面板已經擋了一層,但有人直接送 PR 改 dictionary.json 時
+   * 面板的防護一點作用都沒有。這一筆若進了字典,
+   * 人々 會變成 ひとどき —— 而且是所有使用者。
+   */
+  const { entries, skipped } = parseSharedDictionary(
+    ok([
+      { surface: '々', reading: 'どき' },
+      { surface: '時々', reading: 'ときどき' },
+    ])
+  );
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].surface, '時々');
+  assert.equal(skipped, 1);
+});

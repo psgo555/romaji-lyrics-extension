@@ -20,6 +20,7 @@
  */
 
 import { isValidReading } from '../content/reading.js';
+import { isIterationMarkOnly } from '../content/cjk.js';
 
 /** 認得的格式版本。改格式時一起改這裡,舊版擴充功能會自動忽略新格式。 */
 export const SUPPORTED_VERSION = 1;
@@ -85,6 +86,17 @@ function isUsableEntry(item, seen) {
 
   // 同一個原文出現兩次時以先出現的為準,不要讓後面的偷偷蓋掉
   if (seen.has(surface)) return false;
+
+  /*
+   * 只有疊字符(々 之類)的條目一律擋掉。
+   *
+   * 它讀什麼完全取決於前一個字(時々=ときどき、人々=ひとびと),
+   * 單獨指定一個讀音必定會弄壞其他所有含它的詞 —— 而且是弄壞所有使用者的。
+   *
+   * 面板那邊已經擋了一層,但這裡是**資料層**:有人直接送 PR 改這個檔案時,
+   * 面板的防護一點作用都沒有。兩邊都要擋。
+   */
+  if (isIterationMarkOnly(surface)) return false;
 
   /*
    * reading 必須是假名 —— 只有一個例外:寫成跟 surface 一樣代表
