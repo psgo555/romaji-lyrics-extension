@@ -98,6 +98,49 @@ export function isIterationMarkOnly(text) {
   return ITERATION_MARKS.test(text ?? '');
 }
 
+/** 單一疊字符的比對,給下面的清除用 */
+const ITERATION_MARK_GLOBAL = /[々〻ゝゞヽヾ〃]/gu;
+
+/**
+ * 拿掉活到最後、原樣掉進羅馬拼音裡的疊字符。
+ *
+ * ── 為什麼「活下來」就代表它是壞的 ────────────────────────────
+ * 疊字符的意思是「重複前一個字」,所以它**永遠是某個詞的一部分**。
+ * 轉換正常時它會跟前面的字一起被處理掉,根本不會出現在結果裡:
+ *
+ *   時々 → tokidoki      人々 → hitobito
+ *   様々 → samazama      日々 → hibi        (實測,都不需要任何字典條目)
+ *
+ * 反過來說,它若原樣留在輸出裡,就代表**它沒有配對到任何東西** ——
+ * 多半是歌詞來源打錯(例如「時時々」多打一個時,留下孤立的 々)。
+ *
+ * 那時候拿掉它才是對的:前面的字已經正確轉出來了,那個 々 是多餘的。
+ *
+ * ── 為什麼不是「換成前一個字的讀音」 ──────────────────────────
+ * 那是最直覺的想法,但做不到:輸出到這一步已經是羅馬拼音了,
+ * 「前一個字」是什麼字已經不知道。而回到原文去展開(時々 → 時時)
+ * 在正常情況根本用不到(本來就轉得對),在壞掉的情況又會展開成
+ * 更錯的東西(時時々 → 時時時)。
+ *
+ * ── 這不會妨礙使用者補讀音 ────────────────────────────────────
+ * 補讀音的面板讀的是**原文**不是拼音,所以整個詞(含 々)都還選得到。
+ *
+ * 跟 stripProlongMarks 一樣**會改變字串長度**,所以同樣不可以併進
+ * stripMacrons(那支必須維持長度,手動切分的索引靠它)。
+ */
+export function stripIterationMarks(text) {
+  if (!ITERATION_MARK_GLOBAL.test(text)) {
+    ITERATION_MARK_GLOBAL.lastIndex = 0; // 有 g 旗標,用完要歸零
+    return text;
+  }
+  ITERATION_MARK_GLOBAL.lastIndex = 0;
+
+  return text
+    .replace(ITERATION_MARK_GLOBAL, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 /** 這段文字裡有沒有需要轉換的日文? */
 export function hasJapanese(text) {
   return JP_RE.test(text);

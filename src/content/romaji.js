@@ -13,7 +13,7 @@ import Kuroshiro from 'kuroshiro';
 import KuromojiAnalyzer from 'kuroshiro-analyzer-kuromoji';
 import { applyCorrections } from './corrections.js';
 import { loadUserCorrections, previewCorrections } from './corrections-store.js';
-import { hasJapanese } from './cjk.js';
+import { hasJapanese, stripIterationMarks } from './cjk.js';
 import { stripMacrons, stripProlongMarks } from './macron.js';
 
 const LOG = '[romaji]';
@@ -124,15 +124,16 @@ async function convert(kind, text) {
      * 平假名模式不動:那邊的長音本來就寫成「おう」「うう」這樣的假名,
      * 而原樣留著的 ー 在假名輸出裡是正確寫法,不是錯誤。
      *
-     * 羅馬拼音模式要做兩件事:
-     *   stripMacrons      把 ā ō 這種頭上一橫拿掉(長度不變)
-     *   stripProlongMarks 字典不認識的詞會把 ー 原樣吐出來,那不是羅馬字
+     * 羅馬拼音模式要做三件事:
+     *   stripMacrons        把 ā ō 這種頭上一橫拿掉(長度不變)
+     *   stripProlongMarks   字典不認識的詞會把 ー 原樣吐出來,那不是羅馬字
+     *   stripIterationMarks 同理,活到最後的 々 代表它沒配對到任何字
      */
     const trimmed = converted ? converted.trim() : null;
     const result = trimmed
       ? kind === 'kana'
         ? trimmed
-        : stripProlongMarks(stripMacrons(trimmed))
+        : stripIterationMarks(stripProlongMarks(stripMacrons(trimmed)))
       : null;
 
     // 簡單的容量上限:滿了就清掉最舊的一筆(Map 保證插入順序)
@@ -172,7 +173,7 @@ export async function previewRomaji(text, candidate) {
     const romaji = await kuroshiro.convert(corrected, { to: 'romaji', mode: 'spaced' });
     // 要跟 convert() 的出口做完全一樣的處理 —— 預覽跟實際結果長得不一樣的話,
     // 使用者是照著預覽決定要不要存的,那等於騙他
-    return romaji ? stripProlongMarks(stripMacrons(romaji.trim())) : null;
+    return romaji ? stripIterationMarks(stripProlongMarks(stripMacrons(romaji.trim()))) : null;
   } catch (err) {
     console.warn(`${LOG} 預覽轉換失敗:`, text, err);
     return null;

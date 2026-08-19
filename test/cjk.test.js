@@ -15,6 +15,7 @@ import {
   findUnreadKanji,
   toLetterRanges,
   isIterationMarkOnly,
+  stripIterationMarks,
 } from '../src/content/cjk.js';
 
 test('平假名、片假名、漢字都算日文', () => {
@@ -102,4 +103,31 @@ test('一般文字不是疊字符', () => {
   assert.equal(isIterationMarkOnly('漢字'), false);
   assert.equal(isIterationMarkOnly(''), false);
   assert.equal(isIterationMarkOnly(null), false);
+});
+
+test('活到最後的疊字符要拿掉 —— 那代表它沒配對到任何字', () => {
+  /*
+   * 正常情況 々 會跟前面的字一起被處理掉,根本不會出現在輸出裡。
+   * 它若留下來就代表歌詞來源有問題(例如「時時々」多打一個時)。
+   */
+  assert.equal(stripIterationMarks('tokidoki 々 kohei ni'), 'tokidoki kohei ni');
+  assert.equal(stripIterationMarks('hi yururirappa々'), 'hi yururirappa');
+});
+
+test('拿掉之後不留連續空白或前後空白', () => {
+  assert.ok(!stripIterationMarks('a 々 b').includes('  '));
+  assert.equal(stripIterationMarks('々 abc'), 'abc');
+  assert.equal(stripIterationMarks('abc 々'), 'abc');
+});
+
+test('沒有疊字符的字串原樣返回', () => {
+  assert.equal(stripIterationMarks('tokidoki ame ga furu'), 'tokidoki ame ga furu');
+  assert.equal(stripIterationMarks(''), '');
+});
+
+test('連續呼叫結果一致(正規表達式有 g 旗標,lastIndex 要歸零)', () => {
+  // 這種 bug 只在第二次呼叫才出現,很容易漏掉
+  for (let i = 0; i < 3; i += 1) {
+    assert.equal(stripIterationMarks('a 々 b'), 'a b', `第 ${i + 1} 次呼叫`);
+  }
 });
