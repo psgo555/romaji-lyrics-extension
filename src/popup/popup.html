@@ -47,36 +47,6 @@
     </section>
 
     <section class="field">
-      <label class="field-label" for="sweep">
-        掃描快慢 <output class="field-value" id="sweep-value"></output>
-      </label>
-      <input
-        class="slider"
-        type="range"
-        id="sweep"
-        min="50"
-        max="200"
-        step="5"
-        aria-describedby="sweep-hint"
-      />
-      <div class="nudge" role="group" aria-label="以 10% 為單位調整掃描快慢">
-        <button type="button" class="nudge-btn" id="sweep-slower" data-delta="-10">
-          − 10%
-          <span class="nudge-sub">掃得慢一點</span>
-        </button>
-        <button type="button" class="nudge-btn" id="sweep-faster" data-delta="10">
-          ＋ 10%
-          <span class="nudge-sub">掃得快一點</span>
-        </button>
-      </div>
-      <p class="field-hint" id="sweep-hint">
-        <strong>字亮得太快就按左邊,整句唱完還沒掃到底就按右邊。</strong>
-        100% 是原速。這個設定在**每一首歌**上都有效,
-        包含本身就附有逐字時間軸的歌。
-      </p>
-    </section>
-
-    <section class="field">
       <span class="field-label">
         自訂讀音 <output class="field-value" id="corrections-count"></output>
       </span>
