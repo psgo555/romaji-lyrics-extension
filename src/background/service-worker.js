@@ -22,7 +22,18 @@
 import { hasJapanese } from '../content/cjk.js';
 
 const LRCLIB_ENDPOINT = 'https://lrclib.net/api/search';
-const CLIENT_HEADER = 'romaji-lyrics-extension/0.1.0 (https://github.com/local/romaji-lyrics-extension)';
+/*
+ * LRCLIB 要求標明來源,好在出問題時能聯絡開發者。
+ *
+ * 這個值由 build.mjs 從 package.json 注入(名稱 / 版本 / 專案網址),
+ * 這裡刻意不寫死 —— 先前寫死的那份填的是不存在的網址(github.com/local/…),
+ * 等於規避了那個要求;而且版本號也不會跟著 package.json 走,遲早對不上。
+ *
+ * 萬一沒被注入(例如有人直接用 Node 跑這支檔案),退回一個誠實的標示,
+ * 不要假裝成某個不存在的專案。
+ */
+const CLIENT_HEADER =
+  typeof __LRCLIB_CLIENT__ === 'string' ? __LRCLIB_CLIENT__ : 'romaji-lyrics-extension (unbundled)';
 const CACHE_PREFIX = 'lrclib:';
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 天
 const FETCH_TIMEOUT_MS = 10_000; // 單次 LRCLIB 請求上限
