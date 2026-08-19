@@ -33,12 +33,16 @@ const QUOTA_BYTES = 7000;
 let entries = {};
 const listeners = new Set();
 
-/** 讀音只接受假名與長音符 —— 混進漢字等於沒修正到 */
-export const READING_PATTERN = /^[ぁ-ゟ゠-ヿー]+$/u;
-
-export function isValidReading(reading) {
-  return READING_PATTERN.test(reading ?? '');
-}
+/*
+ * 讀音的驗證搬到 reading.js 了 —— 跟「把輸入轉成假名」放在一起,
+ * 那兩件事是同一個問題的兩面,拆開放的話放寬了其中一邊就會對不上。
+ *
+ * 另一個原因:這支檔案有 module-level 的 chrome 呼叫,Node 測不到,
+ * 而讀音驗證正是最需要測的部分。
+ *
+ * 這裡原樣再匯出一次,既有的呼叫端一行都不用改。
+ */
+export { READING_PATTERN, isValidReading } from './reading.js';
 
 /** 內建的 + 使用者的,同一個原文以使用者的為準 */
 function merge() {

@@ -172,6 +172,24 @@
   border-color: #1db954;
 }
 
+/*
+ * 打羅馬拼音時,把轉出來的假名回饋給使用者。
+ *
+ * 沒有這個的話,輸入框裡是 shin no zou、預覽裡也是 shin no zou,
+ * 中間那步(轉成 しんのぞう)完全看不見 —— 一旦轉錯,使用者只會覺得
+ * 「我明明打對了」而不知道問題出在哪一段。
+ */
+.romaji-fix-kana:empty {
+  display: none;
+}
+
+.romaji-fix-kana {
+  margin: 6px 0 0;
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+
 .romaji-fix-error:empty {
   display: none;
 }
