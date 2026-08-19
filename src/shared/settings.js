@@ -71,6 +71,27 @@ export function normalizeSweepMs(value) {
   return Math.min(SWEEP_MS_MAX, Math.max(SWEEP_MS_MIN, Math.round(number)));
 }
 
+/**
+ * 把提前量講成人話。
+ *
+ * 內部一律用毫秒(時間計算需要),但**不要讓使用者讀毫秒** ——
+ * 「+900 ms」得先在腦裡除以一千才知道是多久,而且正負號還要另外理解。
+ * 「提早 0.9 秒」不必翻譯,看到就懂。
+ *
+ * 放在這裡而不是 popup.js:正負號代表提早還是延後,是這個設定的**定義**
+ * 的一部分。哪天有別的地方要顯示它,不該再自己解讀一次而弄反。
+ *
+ * @param {number} ms 已經正規化過的毫秒值
+ */
+export function describeOffset(ms) {
+  const value = normalizeOffset(ms);
+  if (value === 0) return '不調整';
+
+  // 刻度是 50ms,所以最多兩位小數;把尾巴的零去掉,0.90 顯示成 0.9
+  const seconds = (Math.abs(value) / 1000).toFixed(2).replace(/\.?0+$/, '');
+  return value > 0 ? `提早 ${seconds} 秒` : `延後 ${seconds} 秒`;
+}
+
 /** 把提前量夾在合理範圍內;認不得的值退回預設 */
 export function normalizeOffset(value) {
   const number = Number(value);
