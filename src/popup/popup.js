@@ -1,6 +1,6 @@
 /**
  * popup.js
- * 設定介面:顯示方式、高亮提前量、掃描速度,以及自訂讀音的管理。
+ * 設定介面:顯示方式、高亮提前量,以及自訂讀音的管理。
  * 寫入 chrome.storage.sync 之後,content script 透過 storage.onChanged 立即套用。
  */
 
@@ -9,7 +9,6 @@ import {
   setSetting,
   normalizeMode,
   normalizeOffset,
-  normalizeSweepSpeed,
   DISPLAY_MODES,
 } from '../shared/settings.js';
 
@@ -34,8 +33,6 @@ import {
 const modesEl = document.getElementById('modes');
 const offsetEl = document.getElementById('offset');
 const offsetValueEl = document.getElementById('offset-value');
-const sweepEl = document.getElementById('sweep');
-const sweepValueEl = document.getElementById('sweep-value');
 const correctionsEl = document.getElementById('corrections');
 const correctionsCountEl = document.getElementById('corrections-count');
 const correctionsErrorEl = document.getElementById('corrections-error');
@@ -72,12 +69,6 @@ function renderModes(current) {
 function renderOffset(value) {
   offsetEl.value = String(value);
   offsetValueEl.textContent = `${value > 0 ? '+' : ''}${value} ms`;
-}
-
-/** 掃描快慢是倍率,顯示成「100%」比毫秒好懂 */
-function renderSweep(value) {
-  sweepEl.value = String(value);
-  sweepValueEl.textContent = `${value}%`;
 }
 
 /*
@@ -119,27 +110,14 @@ for (const id of ['offset-later', 'offset-earlier']) {
   button.addEventListener('click', () => nudgeOffset(Number(button.dataset.delta)));
 }
 
-sweepEl.addEventListener('input', () => {
-  const value = normalizeSweepSpeed(sweepEl.value);
-  renderSweep(value);
-  setSetting('sweepSpeed', value).catch((err) =>
-    console.warn('[romaji] 寫入掃描快慢失敗:', err)
-  );
-});
-
-/* 以 10% 為單位的加減,跟提前量那組同一個道理:滑桿難對準,按鈕才好用 */
-function nudgeSweep(delta) {
-  const value = normalizeSweepSpeed(Number(sweepEl.value) + delta);
-  renderSweep(value);
-  setSetting('sweepSpeed', value).catch((err) =>
-    console.warn('[romaji] 寫入掃描快慢失敗:', err)
-  );
-}
-
-for (const id of ['sweep-slower', 'sweep-faster']) {
-  const button = document.getElementById(id);
-  button.addEventListener('click', () => nudgeSweep(Number(button.dataset.delta)));
-}
+/*
+ * 這裡曾經有一組「掃描快慢」的控制項,拿掉了。
+ *
+ * 理由見 settings.js 的說明:一句唱多久是歌本身決定的,調快會讓字掃到底後
+ * 停在句尾乾等、調慢會在換行時被截斷,兩邊都不對。掃描的正確行為只有一種。
+ * 使用者感覺到的「太快」其實是整體時間差,那由上面的提前量處理 ——
+ * 它讓整句與逐字一起平移,不會拆散兩者的關係。
+ */
 
 /* ------------------------------------------------------------ 自訂讀音 */
 
@@ -270,7 +248,6 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'sync') return;
   if (changes.displayMode) renderModes(normalizeMode(changes.displayMode.newValue));
   if (changes.syncOffsetMs) renderOffset(normalizeOffset(changes.syncOffsetMs.newValue));
-  if (changes.sweepSpeed) renderSweep(normalizeSweepSpeed(changes.sweepSpeed.newValue));
 });
 
 /*
@@ -288,10 +265,9 @@ onCorrectionsChanged((entries) => {
 });
 
 async function main() {
-  const { displayMode, syncOffsetMs, sweepSpeed } = await getSettings();
+  const { displayMode, syncOffsetMs } = await getSettings();
   renderModes(displayMode);
   renderOffset(syncOffsetMs);
-  renderSweep(sweepSpeed);
 
   renderCorrections(await loadUserCorrections());
 }
