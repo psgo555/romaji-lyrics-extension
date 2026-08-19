@@ -23,6 +23,7 @@
 import { addUserCorrection, isValidReading } from './corrections-store.js';
 import { previewRomaji } from './romaji.js';
 import { toKanaReading } from './reading.js';
+import { isIterationMarkOnly } from './cjk.js';
 
 const PREVIEW_DEBOUNCE_MS = 200;
 const PANEL_WIDTH = 320;
@@ -112,8 +113,30 @@ function schedulePreview() {
   previewTimer = setTimeout(runPreview, PREVIEW_DEBOUNCE_MS);
 }
 
+/**
+ * 目前的選取範圍能不能補讀音。
+ *
+ * 只選到疊字符(々 之類)是無效的 —— 它讀什麼完全看前面是什麼字,
+ * 單獨指定一個讀音必定會弄壞其他所有含它的詞。詳見 cjk.js。
+ *
+ * @returns {string|null} 不能補時回傳要顯示的原因
+ */
+function selectionProblem() {
+  if (isIterationMarkOnly(selectedSurface())) {
+    return '「々」這種疊字符要跟前面的字一起選 —— 它讀什麼取決於前一個字';
+  }
+  return null;
+}
+
 async function runPreview() {
   if (!rootEl) return;
+
+  /*
+   * 選取範圍本身有問題時,立刻講 —— 不要等到使用者填完讀音、
+   * 按了儲存才說不行。那時他已經在錯的方向上花了力氣。
+   */
+  const problem = selectionProblem();
+  showError(problem);
 
   // 使用者可能打的是羅馬拼音,先轉成假名再判斷
   const reading = toKanaReading(q('.romaji-fix-input').value);
@@ -137,6 +160,13 @@ function showError(message) {
 /* -------------------------------------------------------------- 存檔 */
 
 async function save() {
+  // 選取範圍本身無效就不要存,存了會弄壞其他詞
+  const problem = selectionProblem();
+  if (problem) {
+    showError(problem);
+    return;
+  }
+
   // 跟預覽走同一條路:先轉假名再驗證。兩邊若不一致,
   // 會出現「預覽看起來對、按儲存卻說格式錯」這種莫名其妙的狀況。
   const reading = toKanaReading(q('.romaji-fix-input').value);
@@ -191,6 +221,13 @@ const REPO_URL =
 function shareCorrection() {
   if (!REPO_URL) {
     showError('這個版本沒有設定專案網址,無法分享');
+    return;
+  }
+
+  const problem = selectionProblem();
+  if (problem) {
+    // 分享出去的東西所有人都會拿到,這裡更不能放行
+    showError(problem);
     return;
   }
 
