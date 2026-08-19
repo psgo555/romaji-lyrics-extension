@@ -49,6 +49,57 @@
       "surface": "熄み",
       "reading": "やみ",
       "note": "RADWIMPS〈すずめ〉。不可寫成單字「熄」—— 熄滅 讀 そくめつ"
+    },
+
+    {
+      "surface": "鬱",
+      "reading": "うつ",
+      "note": "椎名Mota〈Young Girl A〉。單獨用時讀不出來,但複合詞本來就對 —— 所以下面那些守衛條目一個都不能少"
+    },
+    {
+      "surface": "鬱陶しい",
+      "reading": "鬱陶しい",
+      "note": "守衛:本來就讀對(うっとうしい),要擋住上面的單字「鬱」"
+    },
+    {
+      "surface": "鬱蒼",
+      "reading": "鬱蒼",
+      "note": "守衛:うっそう"
+    },
+    {
+      "surface": "鬱憤",
+      "reading": "鬱憤",
+      "note": "守衛:うっぷん"
+    },
+    {
+      "surface": "鬱屈",
+      "reading": "鬱屈",
+      "note": "守衛:うっくつ"
+    },
+    {
+      "surface": "鬱血",
+      "reading": "鬱血",
+      "note": "守衛:うっけつ"
+    },
+    {
+      "surface": "鬱積",
+      "reading": "鬱積",
+      "note": "守衛:うっせき"
+    },
+    {
+      "surface": "憂鬱",
+      "reading": "憂鬱",
+      "note": "守衛:ゆううつ"
+    },
+    {
+      "surface": "陰鬱",
+      "reading": "陰鬱",
+      "note": "守衛:いんうつ"
+    },
+    {
+      "surface": "躁鬱",
+      "reading": "躁鬱",
+      "note": "守衛:そううつ"
     }
   ]
 }
