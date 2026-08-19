@@ -1,69 +1,60 @@
 <!DOCTYPE html>
 <html lang="zh-Hant">
-  <head>
-    <meta charset="utf-8" />
-    <title>日文歌詞羅馬拼音</title>
-    <link rel="stylesheet" href="popup.css" />
-  </head>
-  <body>
-    <header class="header">
-      <h1 class="title">日文歌詞羅馬拼音</h1>
-      <p class="subtitle">Spotify 網頁版</p>
-    </header>
 
-    <section class="field">
-      <span class="field-label">顯示方式</span>
-      <div class="modes" id="modes" role="radiogroup" aria-label="顯示方式"></div>
-    </section>
+<head>
+  <meta charset="utf-8" />
+  <title>日文歌詞羅馬拼音</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
 
-    <section class="field">
-      <label class="field-label" for="offset">
-        高亮提前量 <output class="field-value" id="offset-value"></output>
-      </label>
-      <input
-        class="slider"
-        type="range"
-        id="offset"
-        min="-500"
-        max="2000"
-        step="50"
-        aria-describedby="offset-hint"
-      />
-      <div class="nudge" role="group" aria-label="以 0.5 秒為單位調整提前量">
-        <button type="button" class="nudge-btn" id="offset-later" data-delta="-500">
-          − 0.5 秒
-          <span class="nudge-sub">亮得晚一點</span>
-        </button>
-        <button type="button" class="nudge-btn" id="offset-earlier" data-delta="500">
-          ＋ 0.5 秒
-          <span class="nudge-sub">亮得早一點</span>
-        </button>
-      </div>
-      <!--
-        說明只留「滑桿是拿來幹嘛的」。按鈕上已經寫了「亮得早/晚一點」,
-        再解釋一次就是廢話 —— 使用者看得懂按鈕就不必看說明。
-      -->
-      <p class="field-hint" id="offset-hint">滑桿可微調,一格 0.05 秒</p>
-    </section>
+<body>
+  <header class="header">
+    <h1 class="title">日文歌詞羅馬拼音</h1>
+    <p class="subtitle">Spotify 網頁版</p>
+  </header>
 
-    <section class="field">
-      <span class="field-label">
-        自訂讀音 <output class="field-value" id="corrections-count"></output>
-      </span>
-      <ul class="corrections" id="corrections"></ul>
-      <p class="field-error" id="corrections-error" role="alert"></p>
-      <!--
+  <section class="field">
+    <span class="field-label">顯示方式</span>
+    <div class="modes" id="modes" role="radiogroup" aria-label="顯示方式"></div>
+  </section>
+
+  <section class="field">
+    <label class="field-label" for="offset">
+      延遲校正 <output class="field-value" id="offset-value"></output>
+    </label>
+    <input class="slider" type="range" id="offset" min="-500" max="2000" step="50" aria-describedby="offset-hint" />
+    <div class="nudge" role="group" aria-label="以 0.5 秒為單位調整提前量">
+      <button type="button" class="nudge-btn" id="offset-later" data-delta="-500">
+        − 0.5 秒
+        <span class="nudge-sub"></span>
+      </button>
+      <button type="button" class="nudge-btn" id="offset-earlier" data-delta="500">
+        ＋ 0.5 秒
+        <span class="nudge-sub"></span>
+      </button>
+    </div>
+    <p class="field-hint" id="offset-hint"></p>
+  </section>
+
+  <section class="field">
+    <span class="field-label">
+      自訂讀音 <output class="field-value" id="corrections-count"></output>
+    </span>
+    <ul class="corrections" id="corrections"></ul>
+    <p class="field-error" id="corrections-error" role="alert"></p>
+    <!--
         「這裡可以改讀音或刪掉」是多餘的 —— 每一列本來就有輸入框和叉叉,
         看到就知道。只留使用者**猜不到**的那件事:要去哪裡新增。
       -->
-      <p class="field-hint">在歌詞上點紅色波浪底線的字可新增,只接受假名</p>
-    </section>
+    <p class="field-hint">在歌詞上點紅色波浪底線的字可新增,只接受假名</p>
+  </section>
 
-    <!--
+  <!--
       頁尾拿掉了。「設定會立即套用」是預設期待,講出來反而讓人懷疑
       是不是有哪些不會立即套用;而使用者調滑桿時看畫面就知道了。
     -->
 
-    <script src="popup.js"></script>
-  </body>
+  <script src="popup.js"></script>
+</body>
+
 </html>

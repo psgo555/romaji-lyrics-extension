@@ -9,6 +9,7 @@ import {
   setSetting,
   normalizeMode,
   normalizeOffset,
+  describeOffset,
   DISPLAY_MODES,
 } from '../shared/settings.js';
 
@@ -65,10 +66,10 @@ function renderModes(current) {
   }
 }
 
-/** 提前量:正值代表提早亮,顯示成「+900 ms」比較好懂 */
+/** 存的是毫秒,顯示成「提早 0.9 秒」—— 沒人在讀毫秒的 */
 function renderOffset(value) {
   offsetEl.value = String(value);
-  offsetValueEl.textContent = `${value > 0 ? '+' : ''}${value} ms`;
+  offsetValueEl.textContent = describeOffset(value);
 }
 
 /*

@@ -15,6 +15,7 @@ import {
   DISPLAY_MODES,
   normalizeMode,
   normalizeOffset,
+  describeOffset,
   normalizeSweepMs,
   nextMode,
   describeMode,
@@ -85,6 +86,28 @@ test('0.5 秒為單位的加減不會衝出範圍', () => {
   // 快到邊界時要被夾住,不可以溢出
   assert.equal(nudge(-300, -500), SYNC_OFFSET_MIN);
   assert.equal(nudge(1800, 500), SYNC_OFFSET_MAX);
+});
+
+test('提前量顯示成秒,不要讓使用者讀毫秒', () => {
+  assert.equal(describeOffset(900), '提早 0.9 秒');
+  assert.equal(describeOffset(-400), '延後 0.4 秒');
+  assert.equal(describeOffset(0), '不調整');
+});
+
+test('提前量顯示:整數秒不要拖著沒意義的零', () => {
+  assert.equal(describeOffset(2000), '提早 2 秒'); // 不是「2.00 秒」
+  assert.equal(describeOffset(-500), '延後 0.5 秒'); // 不是「0.50 秒」
+});
+
+test('提前量顯示:最小刻度也要看得懂', () => {
+  // 滑桿一格是 50ms,顯示成 0.05 秒
+  assert.equal(describeOffset(50), '提早 0.05 秒');
+});
+
+test('提前量顯示:壞掉的值不會顯示成 NaN', () => {
+  // 使用者不該看到「提早 NaN 秒」
+  assert.ok(!describeOffset('abc').includes('NaN'));
+  assert.ok(!describeOffset(undefined).includes('NaN'));
 });
 
 test('掃描速度夾在合理範圍內', () => {
