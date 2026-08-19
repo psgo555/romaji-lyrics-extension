@@ -92,6 +92,32 @@ offsetEl.addEventListener('input', () => {
   );
 });
 
+/*
+ * 以 0.5 秒為單位的加減按鈕。
+ *
+ * 為什麼在滑桿之外還要這個:滑桿一格是 50ms,要移動 0.5 秒得拉十格,
+ * 而使用者實際感覺到的是「早了大概半秒」這種粒度 —— 用滑桿去湊很難對準。
+ * 滑桿保留下來,是因為粗調對準之後往往還想微調一點點。
+ *
+ * 關鍵是**兩者調的是同一個值**:按鈕不自己記狀態,而是讀目前的值加減之後,
+ * 走跟滑桿完全相同的那條路(normalizeOffset → 畫面 → 儲存)。
+ * 各記一份的話兩邊遲早會對不上 —— 這個專案已經在別處踩過這種坑。
+ *
+ * 夾範圍的事完全交給 normalizeOffset,這裡不重複判斷上下限。
+ */
+function nudgeOffset(deltaMs) {
+  const value = normalizeOffset(Number(offsetEl.value) + deltaMs);
+  renderOffset(value);
+  setSetting('syncOffsetMs', value).catch((err) =>
+    console.warn('[romaji] 寫入提前量失敗:', err)
+  );
+}
+
+for (const id of ['offset-later', 'offset-earlier']) {
+  const button = document.getElementById(id);
+  button.addEventListener('click', () => nudgeOffset(Number(button.dataset.delta)));
+}
+
 sweepEl.addEventListener('input', () => {
   const value = normalizeSweepMs(sweepEl.value);
   renderSweep(value);
