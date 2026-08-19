@@ -238,6 +238,18 @@
   cursor: pointer;
 }
 
+/*
+ * 分享鈕推到最左邊,跟「取消/儲存」隔開。
+ *
+ * 它跟那兩顆是不同性質的動作:取消/儲存是關於「我自己的設定」,
+ * 分享則是把東西送出去給別人。擺在一起容易誤按。
+ */
+.romaji-fix-share {
+  margin-right: auto;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
 .romaji-fix-save {
   background: #1db954;
   border-color: #1db954;

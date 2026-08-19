@@ -11,7 +11,7 @@
 
 import { toRomaji, toKana, ready, invalidateRomajiCache } from './romaji.js';
 import { findUnromanized, findUnreadKanji, toLetterRanges } from './cjk.js';
-import { onCorrectionsChanged } from './corrections-store.js';
+import { onCorrectionsChanged, loadSharedDictionary } from './corrections-store.js';
 import {
   openCorrectionPopover,
   closeCorrectionPopover,
@@ -1345,6 +1345,17 @@ async function main() {
    * 已存的手動切分不用管 —— splitter.js 用 letters 當校驗碼,讀音變了
    * 就對不上、自動作廢,不會把空格插到錯的位置。
    */
+  /*
+   * 去要一份大家共用的字典。
+   *
+   * 刻意**不等它** —— 抓字典要連網,而使用者已經在看歌詞了。
+   * 讓轉換先用內建的跑起來,字典回來之後若真的有變動,
+   * 上面那個訂閱會收到通知並重轉一次。
+   *
+   * 抓不到就抓不到:內建那份還在,只是少了新收的詞。
+   */
+  loadSharedDictionary().catch(() => {});
+
   onCorrectionsChanged(() => {
     invalidateRomajiCache();
     reconvertEverything();

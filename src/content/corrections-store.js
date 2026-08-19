@@ -52,15 +52,62 @@ const listeners = new Set();
 import { isValidReading } from './reading.js';
 export { READING_PATTERN, isValidReading } from './reading.js';
 
-/** 內建的 + 使用者的,同一個原文以使用者的為準 */
+/** 大家共用的那份(從 GitHub 抓回來的),還沒抓到之前是空的 */
+let shared = [];
+
+/**
+ * 把三層合成一份生效清單。
+ *
+ * 優先順序:**使用者自己的 > 共用的 > 內建的**
+ *
+ * 為什麼使用者最大:他看得到自己那首歌的實際結果,而共用字典是為了
+ * 「大多數情況」收的。萬一某個詞在他聽的歌裡是另一種讀法,
+ * 他改完卻被共用的蓋回去,那個功能等於壞了。
+ *
+ * 為什麼共用的排在內建前面:內建那份是隨擴充功能發布的,更新要等新版;
+ * 共用那份改完幾小時內就到。同一個詞兩邊都有時,新的那份比較可能是修好的。
+ */
 function merge() {
-  const overridden = new Set(Object.keys(entries));
+  const userSurfaces = new Set(Object.keys(entries));
+  const sharedSurfaces = new Set(shared.map((s) => s.surface));
+
   const list = [
-    ...BUILTIN.filter((b) => !overridden.has(b.surface)),
+    ...BUILTIN.filter((b) => !userSurfaces.has(b.surface) && !sharedSurfaces.has(b.surface)),
+    ...shared.filter((s) => !userSurfaces.has(s.surface)),
     ...Object.entries(entries).map(([surface, reading]) => ({ surface, reading })),
   ];
   setActiveCorrections(list);
   return list;
+}
+
+/**
+ * 去要一份共用字典並套用。抓不到就維持現狀,不要清空。
+ *
+ * 呼叫端拿到 true 代表清單真的變了 —— 那時才需要重轉畫面上的歌詞,
+ * 沒變的話重轉只是白白讓頁面卡一下。
+ *
+ * @returns {Promise<boolean>} 生效清單有沒有變動
+ */
+export async function loadSharedDictionary() {
+  try {
+    const res = await chrome.runtime.sendMessage({ type: 'FETCH_DICTIONARY' });
+    const next = Array.isArray(res?.entries) ? res.entries : [];
+    if (!next.length) return false;
+
+    // 內容一樣就什麼都不用做
+    const same =
+      next.length === shared.length &&
+      next.every((e, i) => e.surface === shared[i]?.surface && e.reading === shared[i]?.reading);
+    if (same) return false;
+
+    shared = next;
+    merge();
+    notify();
+    return true;
+  } catch (err) {
+    console.warn(`${LOG} 取得共用字典失敗,只用內建的:`, err);
+    return false;
+  }
 }
 
 function notify() {

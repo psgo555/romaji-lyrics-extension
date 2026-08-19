@@ -54,6 +54,9 @@ function buildSkeleton() {
       <span class="romaji-fix-preview-text"></span>
     </div>
     <div class="romaji-fix-actions">
+      <button type="button" class="romaji-fix-share" title="把這個讀音提供給其他使用者">
+        分享給大家
+      </button>
       <button type="button" class="romaji-fix-cancel">取消</button>
       <button type="button" class="romaji-fix-save">儲存</button>
     </div>
@@ -162,6 +165,62 @@ async function save() {
   );
 }
 
+/* ------------------------------------------------------ 分享給其他人 */
+
+/*
+ * 專案的 issue 頁面。由 build.mjs 從 package.json 注入 —— 跟 LRCLIB 的
+ * 來源識別同一個道理,不在程式裡寫死第二份網址。
+ */
+const REPO_URL =
+  typeof __REPO_URL__ === 'string' ? __REPO_URL__ : '';
+
+/**
+ * 把這一筆讀音開成一個預先填好的 GitHub issue。
+ *
+ * ── 為什麼是開 issue,不是直接上傳 ────────────────────────────
+ * 共用字典是所有使用者都會拿到的。如果誰都能直接寫進去,
+ * 一筆錯的讀音就會讓所有人的畫面**很有自信地顯示錯的拼音** ——
+ * 那比轉不出來更糟,因為沒有人看得出來它是錯的。
+ *
+ * 開 issue 保留了「有人看過再合併」這一步,而預先填好內容讓使用者
+ * 不需要懂 GitHub —— 他只要按送出。
+ *
+ * 完全不會自動送出任何東西:按下去只是開一個新分頁,
+ * 內容長什麼樣他自己看得到,不想送就關掉。
+ */
+function shareCorrection() {
+  if (!REPO_URL) {
+    showError('這個版本沒有設定專案網址,無法分享');
+    return;
+  }
+
+  const surface = selectedSurface();
+  const reading = toKanaReading(q('.romaji-fix-input').value);
+
+  if (!isValidReading(reading)) {
+    showError('先把讀音填好再分享(只能填假名或羅馬拼音)');
+    return;
+  }
+
+  const body = [
+    '<!-- 這是自動填好的,確認沒問題就直接送出 -->',
+    '',
+    `- 原文:\`${surface}\``,
+    `- 讀音:\`${reading}\``,
+    `- 這一句:${state.lineText}`,
+    '',
+    '（如果知道是哪首歌,補在這裡會更好查證）',
+    '曲名 / 歌手:',
+  ].join('\n');
+
+  const url =
+    `${REPO_URL}/issues/new` +
+    `?title=${encodeURIComponent(`補讀音:${surface} → ${reading}`)}` +
+    `&body=${encodeURIComponent(body)}`;
+
+  window.open(url, '_blank', 'noopener');
+}
+
 /* ------------------------------------------------------------ 對外介面 */
 
 export function isPopoverOpen() {
@@ -229,6 +288,7 @@ export function openCorrectionPopover({ lineText, surface, anchor, guardKeydown 
   q('.romaji-fix-close').addEventListener('click', closeCorrectionPopover);
   q('.romaji-fix-cancel').addEventListener('click', closeCorrectionPopover);
   q('.romaji-fix-save').addEventListener('click', save);
+  q('.romaji-fix-share').addEventListener('click', shareCorrection);
 
   input.focus();
   runPreview();

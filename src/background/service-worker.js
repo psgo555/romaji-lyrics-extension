@@ -20,6 +20,7 @@
  * 所以背景程式可以安心引用。
  */
 import { hasJapanese } from '../content/cjk.js';
+import { parseSharedDictionary } from '../shared/shared-dictionary.js';
 
 const LRCLIB_ENDPOINT = 'https://lrclib.net/api/search';
 /*
@@ -235,7 +236,89 @@ async function fetchLyrics(trackName, artistName, durationSec) {
 
 globalThis.fetchLyrics = fetchLyrics;
 
+/* ------------------------------------------------- 大家共用的讀音字典 */
+
+/*
+ * 字典放在 GitHub 上一個公開檔案,擴充功能定期來抓。
+ *
+ * 為什麼是這個做法而不是自己架伺服器:
+ * - 不用花錢、不用維護,GitHub 幫忙放
+ * - 只有維護者能改,所以**品質仍然有人把關** —— 這很重要,
+ *   錯的讀音會讓畫面很有自信地顯示錯的拼音,那比轉不出來更糟
+ * - 改完不必發新版,合併後幾小時內所有人都拿得到
+ * - 只有 GET、不送出任何資料,「這個擴充功能沒有伺服器」的說法仍然成立
+ */
+const DICTIONARY_URL =
+  'https://raw.githubusercontent.com/psgo555/romaji-lyrics-extension/master/dictionary.json';
+const DICTIONARY_KEY = 'sharedDictionary';
+const DICTIONARY_TTL_MS = 12 * 60 * 60 * 1000; // 12 小時
+const DICTIONARY_CACHE_VERSION = 1;
+
+/**
+ * 取得共用字典。先看快取,過期才連網。
+ *
+ * 任何一步失敗都回空陣列而不是丟例外 —— 抓不到字典只代表少了幾個新詞,
+ * 內建那份還在,不該讓整個轉換流程跟著壞掉。
+ */
+async function fetchSharedDictionary() {
+  const stored = await chrome.storage.local.get(DICTIONARY_KEY);
+  const cached = stored[DICTIONARY_KEY];
+
+  if (
+    cached?.v === DICTIONARY_CACHE_VERSION &&
+    Date.now() - cached.savedAt < DICTIONARY_TTL_MS
+  ) {
+    return { entries: cached.entries ?? [], cached: true };
+  }
+
+  try {
+    const res = await fetch(DICTIONARY_URL, { cache: 'no-cache' });
+    if (!res.ok) {
+      console.warn(`${LOG} 共用字典下載失敗,狀態碼 ${res.status}`);
+      return { entries: cached?.entries ?? [], cached: true }; // 過期的也比沒有好
+    }
+
+    const { entries, skipped } = parseSharedDictionary(await res.json());
+    if (skipped) {
+      console.warn(`${LOG} 共用字典有 ${skipped} 筆沒通過驗證,已略過`);
+    }
+
+    /*
+     * 驗完是空的就**不要覆蓋快取**。
+     *
+     * 那代表檔案壞了或格式換了。這時把空的存進去,等於把使用者原本
+     * 還能用的那份也一起清掉 —— 一個人手滑改壞檔案,所有人的字典就空了。
+     */
+    if (!entries.length) {
+      console.warn(`${LOG} 共用字典驗完是空的,沿用先前的`);
+      return { entries: cached?.entries ?? [], cached: true };
+    }
+
+    await chrome.storage.local.set({
+      [DICTIONARY_KEY]: { v: DICTIONARY_CACHE_VERSION, entries, savedAt: Date.now() },
+    });
+    console.info(`${LOG} 共用字典已更新,${entries.length} 筆`);
+    return { entries, cached: false };
+  } catch (err) {
+    console.warn(`${LOG} 取得共用字典失敗,沿用先前的:`, err);
+    return { entries: cached?.entries ?? [], cached: true };
+  }
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === 'FETCH_DICTIONARY') {
+    fetchSharedDictionary()
+      .then(sendResponse)
+      .catch((err) => {
+        console.warn(`${LOG} 處理 FETCH_DICTIONARY 失敗:`, err);
+        sendResponse({ entries: [], cached: false });
+      });
+    return true;
+  }
+  return handleLyricsMessage(message, sendResponse);
+});
+
+function handleLyricsMessage(message, sendResponse) {
   // 不是我們的訊息就回 false,把通道讓給其他 listener,不要佔著不回應
   if (message?.type !== 'FETCH_LYRICS') return false;
 
@@ -270,4 +353,4 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     .finally(() => clearTimeout(fuse));
 
   return true; // 保持非同步回應通道開著
-});
+}

@@ -4,7 +4,10 @@
   "version": "0.1.0",
   "description": "在 Spotify 網頁版的日文歌詞旁顯示羅馬拼音,方便不懂假名的人跟唱。",
   "permissions": ["storage"],
-  "host_permissions": ["https://lrclib.net/*"],
+  "host_permissions": [
+    "https://lrclib.net/*",
+    "https://raw.githubusercontent.com/psgo555/romaji-lyrics-extension/*"
+  ],
   "background": {
     "service_worker": "service-worker.js"
   },
