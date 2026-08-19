@@ -5,10 +5,10 @@
   "description": "Chrome 擴充功能:在 Spotify 網頁版的日文歌詞下方顯示羅馬拼音",
   "license": "MIT",
   "author": "rabbit EC site",
-  "//repository": "★發布前必改★ 把 YOUR-USERNAME 換成你的 GitHub 帳號。這個網址會送給 LRCLIB 當來源識別,讓他們在出問題時能找到你。build.mjs 會擋住還沒改的版本。",
+  "//repository": "這個網址會送給 LRCLIB 當來源識別,讓他們在出問題時能聯絡到開發者。改動時記得專案要真的存在。",
   "repository": {
     "type": "git",
-    "url": "https://github.com/YOUR-USERNAME/romaji-lyrics-extension"
+    "url": "https://github.com/psgo555/romaji-lyrics-extension"
   },
   "type": "module",
   "scripts": {
