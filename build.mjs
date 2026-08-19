@@ -85,6 +85,8 @@ const bundleOptions = {
     global: 'globalThis',
     // 來源識別碼在打包時注入,程式裡不寫死(見上方 clientHeader 的說明)
     __LRCLIB_CLIENT__: JSON.stringify(clientHeader),
+    // 分享讀音時要開的 issue 頁面,同樣不在程式裡寫死
+    __REPO_URL__: JSON.stringify(repoUrl),
   },
   alias: { path: 'path-browserify' },
   plugins: [stubNodeBuiltins],
