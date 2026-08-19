@@ -45,3 +45,44 @@ const COMBINING_MACRON = String.fromCharCode(0x0304);
 export function stripMacrons(text) {
   return text.normalize('NFD').split(COMBINING_MACRON).join('').normalize('NFC');
 }
+
+/** 長音記號 U+30FC(ー)。把前一個音拉長,本身沒有讀音。 */
+const PROLONG_MARK = 'ー';
+
+/**
+ * 拿掉沒被轉換、原樣掉進羅馬拼音裡的長音記號。
+ *
+ * ── 什麼時候會發生 ────────────────────────────────────────────
+ * 字典認得的詞不會有這個問題:「ラーメン」正確轉成 rāmen。
+ * 但字典**不認識**的詞(擬聲詞、造詞、歌詞裡的玩法)會退回逐字處理,
+ * 而 ー 不是假名、對不到任何羅馬字,就原樣掉出來:
+ *
+ *   ひゅるひゅるりーらら  →  hi yuruhyururi ー ra ra
+ *                                          ^^ 這個
+ *
+ * 不處理的話有兩個問題:拼音裡混著一個日文符號很難讀;而且「哪些字沒轉出來」
+ * 的偵測會把它標紅、叫使用者去補讀音 —— 但**它本來就沒有讀音**,
+ * 那是一個做不到的要求。
+ *
+ * ── 為什麼是拿掉而不是把母音拉長 ──────────────────────────────
+ * 為了跟既有行為一致:stripMacrons 已經把 rāmen 變成 ramen,長音的資訊
+ * 本來就沒有保留。這裡若改成 hyururii,同一個概念會有兩種寫法。
+ * 跟唱要的是好讀,不是嚴謹的轉寫(見上面 stripMacrons 的說明)。
+ *
+ * ── 注意:這支會改變字串長度 ───────────────────────────────────
+ * 跟 stripMacrons 相反 —— 那支必須維持長度(手動切分的索引靠它),
+ * 這支不行也不必。所以**兩者刻意分開**,不要合併成一個函式,
+ * 否則會把 stripMacrons 的長度保證一起破壞掉。
+ *
+ * @param {string} text 轉換後的羅馬拼音
+ * @returns {string}
+ */
+export function stripProlongMarks(text) {
+  if (!text.includes(PROLONG_MARK)) return text; // 絕大多數句子走這條,不必動字串
+
+  return text
+    .split(PROLONG_MARK)
+    .join('')
+    .replace(/\s{2,}/g, ' ') // 拿掉之後可能留下連續空白
+    .trim();
+}

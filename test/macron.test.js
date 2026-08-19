@@ -11,7 +11,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { stripMacrons } from '../src/content/macron.js';
+import { stripMacrons, stripProlongMarks } from '../src/content/macron.js';
 
 test('五個母音的長音符都要拿掉', () => {
   assert.equal(stripMacrons('ā'), 'a');
@@ -50,4 +50,45 @@ test('不會誤傷其他重音符號', () => {
 
 test('日文與拼音混在一起時只動拼音', () => {
   assert.equal(stripMacrons('二人 kizamō'), '二人 kizamo');
+});
+
+/* ------------------------------------------------- 長音記號 ー */
+
+test('拿掉原樣掉出來的長音記號', () => {
+  /*
+   * 字典不認識的詞(擬聲詞、造詞)會退回逐字處理,而 ー 不是假名、
+   * 對不到羅馬字就原樣掉出來。實測 RADWIMPS〈ひゅるりらぱっぱ〉:
+   *   ひゅるひゅるりーらら → hi yuruhyururi ー ra ra
+   */
+  assert.equal(stripProlongMarks('hi yuruhyururi ー ra ra'), 'hi yuruhyururi ra ra');
+  assert.equal(stripProlongMarks('atchi yu ー ma toki'), 'atchi yu ma toki');
+});
+
+test('黏在字尾的長音記號也要拿掉', () => {
+  assert.equal(stripProlongMarks('hi yururirappaー'), 'hi yururirappa');
+  assert.equal(stripProlongMarks('hi yururirappa ー'), 'hi yururirappa');
+});
+
+test('拿掉之後不可以留下連續空白或前後空白', () => {
+  // 留著的話會多出沒意義的切分點,畫面上也會看到怪怪的空隙
+  assert.ok(!stripProlongMarks('a ー b').includes('  '));
+  assert.equal(stripProlongMarks('ー abc'), 'abc');
+  assert.equal(stripProlongMarks('abc ー'), 'abc');
+});
+
+test('沒有長音記號的字串原樣返回', () => {
+  assert.equal(stripProlongMarks('sukitootta'), 'sukitootta');
+  assert.equal(stripProlongMarks(''), '');
+});
+
+test('這支跟 stripMacrons 是兩件事,不可以合併', () => {
+  /*
+   * stripMacrons 必須維持字串長度(手動切分的索引靠它),
+   * 這支則一定會縮短。合併成一支就會把那個保證一起破壞掉。
+   */
+  const withMacron = 'kizamō';
+  assert.equal(stripMacrons(withMacron).length, withMacron.length, 'stripMacrons 長度不可變');
+
+  const withProlong = 'rappaー';
+  assert.ok(stripProlongMarks(withProlong).length < withProlong.length, 'stripProlongMarks 會縮短');
 });
