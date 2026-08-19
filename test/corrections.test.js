@@ -73,6 +73,8 @@ test('內建表的讀音沒有被改壞(逐筆對照已知正確值)', () => {
     一人: 'ひとり',
     一人称: '一人称', // 守衛條目,原樣保留
     藻掻もが: 'もが',
+    心の臓: 'しんのぞう',
+    熄み: 'やみ',
   };
 
   for (const [surface, reading] of Object.entries(expected)) {
@@ -114,6 +116,29 @@ test('setActiveCorrections 換表之後立刻生效', () => {
   } finally {
     setActiveCorrections(original); // 不要污染其他測試
   }
+});
+
+test('心の臓 要整個詞一起改,不能只改「臓」', () => {
+  // 只補「臓 → ぞう」的話前半段還是錯的(kokoro no zou)
+  assert.equal(applyCorrections('心の臓'), 'しんのぞう');
+  assert.equal(applyCorrections('それらが結ばれるのは 心の臓'), 'それらが結ばれるのは しんのぞう');
+});
+
+test('加了「心の臓」不可以影響其他含「心」的詞', () => {
+  // 若誤寫成「心 → しん」的單字條目,這幾個就會全部走鐘
+  assert.equal(applyCorrections('心が痛い'), '心が痛い');
+  assert.equal(applyCorrections('心配'), '心配');
+});
+
+test('熄み 收整個詞,不可以動到「熄」的其他讀法', () => {
+  assert.equal(applyCorrections('照らすは熄み'), '照らすはやみ');
+
+  /*
+   * 這一項是重點:「熄」在別的詞裡讀 そく(熄滅 = そくめつ)。
+   * 若把它寫成單字條目「熄 → や」,熄滅 會變成「や滅」而唸錯。
+   * 原樣放過雖然轉不出來,但至少不是**錯的**答案。
+   */
+  assert.equal(applyCorrections('熄滅'), '熄滅');
 });
 
 test('使用者的同名項目覆蓋內建的', () => {
