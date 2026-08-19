@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <title>日文歌詞羅馬拼音</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="header">
+      <h1 class="title">日文歌詞羅馬拼音</h1>
+      <p class="subtitle">Spotify 網頁版</p>
+    </header>
+
+    <section class="field">
+      <span class="field-label">顯示方式</span>
+      <div class="modes" id="modes" role="radiogroup" aria-label="顯示方式"></div>
+    </section>
+
+    <section class="field">
+      <label class="field-label" for="offset">
+        高亮提前量 <output class="field-value" id="offset-value"></output>
+      </label>
+      <input
+        class="slider"
+        type="range"
+        id="offset"
+        min="-500"
+        max="2000"
+        step="50"
+        aria-describedby="offset-hint"
+      />
+      <p class="field-hint" id="offset-hint">
+        高亮比歌聲慢就往右拉,太早就往左拉。一邊播一邊調,馬上看得到效果。
+      </p>
+    </section>
+
+    <section class="field">
+      <label class="field-label" for="sweep">
+        掃描速度 <output class="field-value" id="sweep-value"></output>
+      </label>
+      <input
+        class="slider"
+        type="range"
+        id="sweep"
+        min="60"
+        max="320"
+        step="10"
+        aria-describedby="sweep-hint"
+      />
+      <p class="field-hint" id="sweep-hint">
+        逐字高亮掃得太快就往右拉,整句唱完還沒掃到底就往左拉。
+        這首歌本身附有逐字時間軸時不受影響(那時走的是真資料)。
+      </p>
+    </section>
+
+    <section class="field">
+      <span class="field-label">
+        自訂讀音 <output class="field-value" id="corrections-count"></output>
+      </span>
+      <ul class="corrections" id="corrections"></ul>
+      <p class="field-error" id="corrections-error" role="alert"></p>
+      <p class="field-hint">
+        在歌詞上點紅色波浪底線的字就能新增。這裡可以改讀音或刪掉,只接受假名。
+      </p>
+    </section>
+
+    <footer class="footer">設定會立即套用,不需要重新整理頁面</footer>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

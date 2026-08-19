@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "日文歌詞羅馬拼音",
+  "version": "0.1.0",
+  "description": "在 Spotify 網頁版的日文歌詞旁顯示羅馬拼音,方便不懂假名的人跟唱。",
+  "permissions": ["storage"],
+  "host_permissions": ["https://lrclib.net/*"],
+  "background": {
+    "service_worker": "service-worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://open.spotify.com/*"],
+      "js": ["content.js"],
+      "css": ["overlay.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["dict/*"],
+      "matches": ["https://open.spotify.com/*"]
+    }
+  ],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "日文歌詞羅馬拼音"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

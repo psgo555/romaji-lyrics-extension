@@ -1,0 +1,618 @@
+/*
+ * overlay.css
+ * 羅馬拼音的外觀與三種顯示方式。
+ *
+ * 顯示方式全部由 <html> 上的 data-romaji-mode 屬性驅動,
+ * 所以在 popup 切換設定時不需要重新做一次轉換,只是換 CSS。
+ * 只對已處理完的行(data-romaji-processed="done")改 layout,
+ * 避免動到 Spotify 自己還在管的元素。
+ */
+
+.romaji-overlay {
+  font-size: 0.8em;
+  line-height: 1.3;
+  color: #1db954; /* Spotify 綠 */
+  opacity: 0.85;
+  letter-spacing: 0.01em;
+  /* 切分用的空格放在每個 <span> 的開頭,要 pre-wrap 才會顯示出來,
+     同時保留在空格處自然換行的能力 */
+  white-space: pre-wrap;
+}
+
+/* ---- 手動切分:每個字母都是一個可點擊的 span ---- */
+
+.romaji-ch {
+  position: relative;
+  cursor: text;
+}
+
+/* 滑到哪個字母,就提示會切在它的哪一邊 */
+.romaji-ch:hover {
+  background: rgba(29, 185, 84, 0.18);
+  border-radius: 2px;
+}
+
+/*
+ * 轉不出來的字:kuromoji 不認識這個詞,所以把漢字原樣吐了出來。
+ * 用紅色波浪底線標出來,點一下可以自己補讀音。
+ */
+.romaji-ch[data-romaji-unknown] {
+  text-decoration: underline wavy rgba(255, 120, 120, 0.9);
+  text-underline-offset: 3px;
+  cursor: help;
+}
+
+.romaji-ch[data-romaji-unknown]:hover {
+  background: rgba(255, 120, 120, 0.22);
+}
+
+/* ---- 鍵盤編輯模式 ---- */
+
+.romaji-overlay.is-editing {
+  outline: 1px solid rgba(29, 185, 84, 0.5);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+
+.romaji-overlay:focus {
+  outline: none; /* 用上面的 is-editing 外框取代瀏覽器預設 */
+}
+
+/*
+ * 游標畫在字母的左緣,用絕對定位的虛擬元素,
+ * 這樣不會佔寬度、不會把整行文字推移。
+ */
+.romaji-ch[data-caret]::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: -0.1em;
+  bottom: -0.1em;
+  width: 2px;
+  background: #fff;
+  animation: romaji-caret-blink 1.1s steps(2, start) infinite;
+}
+
+@keyframes romaji-caret-blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+/* 使用者若偏好減少動態效果,游標就不要閃 */
+@media (prefers-reduced-motion: reduce) {
+  .romaji-ch[data-caret]::before {
+    animation: none;
+  }
+}
+
+/* ------------------------------------------------ 補讀音的面板 */
+
+.romaji-fix {
+  position: fixed;
+  z-index: 9999;
+  width: 320px;
+  padding: 14px;
+  background: #1e1e1e;
+  border: 1px solid #3a3a3a;
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  color: #f2f2f2;
+  font: 13px/1.5 system-ui, "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+}
+
+.romaji-fix-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.romaji-fix-title {
+  font-weight: 600;
+}
+
+.romaji-fix-close {
+  padding: 0 6px;
+  background: none;
+  border: none;
+  color: #a0a0a0;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.romaji-fix-close:hover {
+  color: #fff;
+}
+
+.romaji-fix-hint {
+  margin: 0 0 10px;
+  color: #a0a0a0;
+  font-size: 11px;
+}
+
+/* 原文逐字排開,點一下就能延伸或縮小選取範圍 */
+.romaji-fix-source {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-bottom: 10px;
+}
+
+.romaji-fix-ch {
+  padding: 4px 5px;
+  background: #2a2a2a;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: #d0d0d0;
+  font: inherit;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.romaji-fix-ch[aria-pressed='true'] {
+  background: rgba(29, 185, 84, 0.18);
+  border-color: #1db954;
+  color: #fff;
+}
+
+.romaji-fix-input {
+  width: 100%;
+  padding: 7px 9px;
+  background: #121212;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  color: #f2f2f2;
+  font: inherit;
+}
+
+.romaji-fix-input:focus {
+  outline: none;
+  border-color: #1db954;
+}
+
+.romaji-fix-error:empty {
+  display: none;
+}
+
+.romaji-fix-error {
+  margin: 6px 0 0;
+  color: #ff7a7a;
+  font-size: 11px;
+}
+
+/* 預覽是這個面板的重點:使用者要靠它看出讀音有沒有涵蓋整個詞 */
+.romaji-fix-preview {
+  margin-top: 10px;
+  padding: 8px 10px;
+  background: #121212;
+  border-radius: 6px;
+}
+
+.romaji-fix-preview-label {
+  display: block;
+  margin-bottom: 2px;
+  color: #a0a0a0;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+.romaji-fix-preview-text {
+  color: #1db954;
+  word-break: break-word;
+}
+
+.romaji-fix-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.romaji-fix-actions button {
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid #3a3a3a;
+  background: transparent;
+  color: #d0d0d0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.romaji-fix-save {
+  background: #1db954;
+  border-color: #1db954;
+  color: #08120c;
+  font-weight: 600;
+}
+
+.romaji-fix-actions button:hover {
+  filter: brightness(1.12);
+}
+
+/* ------------------------------------------------ 播放列上的切換鈕 */
+
+/*
+ * 插在 Spotify「歌詞」按鈕右邊,外觀比照播放列的其他控制項:
+ * 平常是灰的,hover 變白,啟用轉換時是 Spotify 綠。
+ */
+.romaji-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 6px;
+  margin-inline: 2px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: #b3b3b3;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 0.1s ease, opacity 0.1s ease;
+}
+
+.romaji-toggle:hover {
+  color: #fff;
+}
+
+/* 有在轉換時亮綠色,跟 Spotify 其他「啟用中」的控制項一致 */
+.romaji-toggle[data-romaji-toggle='romaji-only'],
+.romaji-toggle[data-romaji-toggle='both'] {
+  color: #1db954;
+}
+
+/* 關閉時淡一點,一眼看得出沒在作用 */
+.romaji-toggle[data-romaji-toggle='off'] {
+  opacity: 0.6;
+}
+
+.romaji-toggle:focus-visible {
+  outline: 2px solid #1db954;
+  outline-offset: 2px;
+}
+
+/*
+ * ---- 為什麼這些選擇器只寫 [data-romaji-processed] 而不寫 ='done' ----
+ *
+ * 這幾條規則會改變高度。如果等到 'done' 才套用,「拼音轉好」的那一瞬間
+ * 整行會突然變高,而每一行轉好的時間又是錯開的 —— Spotify 的自動捲動
+ * 是照元素位置算的,底下的行一直在長高,捲動位置就一直被推移,
+ * 使用者看到的就是「跳一下、下一句開頭被切掉」。
+ *
+ * 改成屬性一出現就套用,而旗標是在送去轉換之前就同步寫上去的,
+ * 所以幾何在該行出現的同一個影格就定案了,轉好時只換文字、不動版面。
+ */
+html[data-romaji-mode='romaji-only'] [data-romaji-processed],
+html[data-romaji-mode='both'] [data-romaji-processed],
+html[data-romaji-mode='kana'] [data-romaji-processed] {
+  display: flex;
+  flex-direction: column;
+}
+
+/* 純羅馬拼音:原文留在 DOM 裡但不顯示,切回 both 時不必重新轉換 */
+html[data-romaji-mode='romaji-only'] .romaji-original {
+  display: none;
+}
+
+/*
+ * 純羅馬拼音模式下,轉不出拼音的行(純英文)要保留原文,否則整行會變空白。
+ *
+ * 注意 'pending' 不在這個名單裡:轉換中的那幾毫秒刻意留白。
+ * 先顯示日文再換成拼音的話,兩者高度不同,又會產生一次跳動 ——
+ * 留白配合下面預留的行高,高度從頭到尾都不變。
+ */
+html[data-romaji-mode='romaji-only'] [data-romaji-processed='skipped'] .romaji-original,
+html[data-romaji-mode='romaji-only'] [data-romaji-processed='empty'] .romaji-original {
+  display: revert;
+}
+
+/*
+ * 轉換中先把第一行的高度佔住,免得拼音填進來時整行從 0 撐開。
+ * 數值就是下面各模式的 line-height。
+ * 只在 pending 時生效 —— skipped 的行要顯示原文,不能被墊高。
+ */
+html[data-romaji-mode='romaji-only'] [data-romaji-processed='pending'] .romaji-overlay:empty {
+  min-height: 1.35em;
+}
+
+html[data-romaji-mode='both'] [data-romaji-processed='pending'] .romaji-overlay:empty {
+  min-height: 1.3em;
+}
+
+/* 假名比拉丁字母高,預留的行高要跟著大一點,否則轉好時仍會撐開一小截 */
+html[data-romaji-mode='kana'] [data-romaji-processed='pending'] .romaji-overlay:empty {
+  min-height: 1.45em;
+}
+
+/* 還沒有內容的 overlay 不該吃到滑鼠事件 */
+.romaji-overlay:empty {
+  pointer-events: none;
+}
+
+/*
+ * ---- 正在唱的那一句要看得出來 ----
+ *
+ * 純拼音模式下原文是藏起來的,連帶把 Spotify 自己的高亮也藏掉了,
+ * 使用者只能靠「大概在畫面中間」猜現在唱到哪句 —— 很難跟。
+ * 這裡讓拼音自己表現出高亮:沒在唱的淡下去,正在唱的亮起來。
+ *
+ * data-romaji-active 由 active-line.js 標記,它是去讀 Spotify 內層元素
+ * 的樣式來判斷的,所以跟 Spotify 自己的高亮是同一個真相來源、不會各走各的。
+ */
+html[data-romaji-mode='romaji-only'] .romaji-overlay,
+html[data-romaji-mode='both'] .romaji-overlay,
+html[data-romaji-mode='kana'] .romaji-overlay {
+  transition: color 0.15s ease, opacity 0.15s ease;
+}
+
+html[data-romaji-mode='romaji-only'] [data-romaji-processed] .romaji-overlay {
+  color: #1db954;
+  opacity: 0.32; /* 沒在唱的壓得夠暗,對比才拉得開 */
+}
+
+html[data-romaji-mode='romaji-only'] [data-romaji-active='true'] .romaji-overlay {
+  color: #fff; /* 跟 Spotify 原生歌詞的高亮一致:亮白 */
+  opacity: 1;
+  text-shadow: 0 0 12px rgba(29, 185, 84, 0.45); /* 微微發光,一眼就找得到 */
+}
+
+/* 原文混合模式下原文本來就會高亮,拼音跟著一起亮就好,不必搶戲 */
+html[data-romaji-mode='both'] [data-romaji-active='true'] .romaji-overlay,
+html[data-romaji-mode='kana'] [data-romaji-active='true'] .romaji-overlay {
+  opacity: 1;
+}
+
+/*
+ * ---- 平假名注音模式 ----
+ *
+ * 給「看得懂假名、只卡在漢字」的人。它跟 both 的版面一樣(原文在上、
+ * 讀音在下),差別只在讀音那一行是假名而不是拉丁字母。
+ *
+ * 字級要比拼音大一點:假名是方塊字,同樣的 em 值看起來會比拉丁字母小,
+ * 0.8em 的假名在歌詞行裡幾乎讀不出來。
+ */
+html[data-romaji-mode='kana'] .romaji-overlay {
+  font-size: 0.92em;
+  letter-spacing: 0.02em;
+}
+
+/*
+ * 假名模式不接受手動切分(理由見 index.js:processLyricsLine ——
+ * 切點是字母索引,假名與拼音的字數不同,共用同一份儲存會互相破壞)。
+ * 游標與 hover 底色都要拿掉,否則看起來可以點、點下去卻沒反應。
+ *
+ * 讀不出來的漢字不在此列:那個仍然要能點,點了會開補讀音的面板。
+ */
+html[data-romaji-mode='kana'] .romaji-ch:not([data-romaji-unknown]) {
+  cursor: inherit;
+}
+
+html[data-romaji-mode='kana'] .romaji-ch:not([data-romaji-unknown]):hover {
+  background: none;
+}
+
+/*
+ * ---- 唱到哪、亮到哪 ----
+ *
+ * 已經唱過的字加上 .is-sung。逐字的 <span> 本來就是手動切分功能建的,
+ * 直接重用,不必另外蓋漸層遮罩 —— 那會跟點擊切分、hover 提示、
+ * 鍵盤游標互相打架。
+ *
+ * 只在正在唱的那一行生效:其他行整行統一淡化就好,
+ * 每一行都畫掃描進度反而雜亂。
+ */
+/*
+ * 逐字上色**只在 overlay 帶著 data-romaji-sweep 時生效**,
+ * 而那個標記只有在這首歌真的有逐字時間軸時才會加上去。
+ *
+ * 沒有標記的行就走上面「整句一起亮」的規則 —— 沒有句內資料就不要
+ * 假裝有,否則只是把一個猜測畫得很有說服力而已。
+ */
+[data-romaji-active='true'] .romaji-overlay[data-romaji-sweep] .romaji-ch {
+  color: rgba(255, 255, 255, 0.42); /* 還沒唱到的 */
+  transition: color 0.12s linear;
+}
+
+[data-romaji-active='true'] .romaji-overlay[data-romaji-sweep] .romaji-ch.is-sung {
+  color: #fff; /* 已經唱過的 */
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .romaji-ch {
+    transition: none;
+  }
+}
+
+/* 使用者若偏好減少動態效果,就不要做顏色漸變 */
+@media (prefers-reduced-motion: reduce) {
+  .romaji-overlay {
+    transition: none;
+  }
+}
+
+/*
+ * ---- 純羅馬拼音模式的可讀性 ----
+ *
+ * 這個模式下拼音是唯一的內容,不再是「輔助標註」,
+ * 所以字級要拉到跟 Spotify 原生歌詞同級,而不是縮小的 0.8em。
+ *
+ * 為什麼用 em 而不是固定 px:
+ * .romaji-overlay 是歌詞行的子元素,em 直接繼承該行的字級,
+ * 所以 1em 就「正好等於 Spotify 這一行原本的大小」,不必去量實際 px,
+ * Spotify 依視窗大小縮放歌詞時也會自動跟著變。
+ * 覺得還要再大就把 1em 改成 1.2em / 1.4em。
+ */
+html[data-romaji-mode='romaji-only'] .romaji-overlay {
+  /*
+   * 字級是「跳動」殘留量的最大單一來源:拼音字數比日文多很多,
+   * 放得越大越容易從一行變兩行,而換行就是實實在在的高度變化。
+   * 1.15em 仍然比 Spotify 原生歌詞大、讀得清楚,但大幅減少換行。
+   * 想再大就調這個值(1.0 = 跟原生歌詞同級)。
+   */
+  font-size: 1.15em;
+  font-weight: inherit; /* 跟著 Spotify 原生歌詞的粗細 */
+  line-height: 1.35;
+  opacity: 1; /* 是主角了,不再半透明 */
+}
+
+/* 句與句之間拉開,否則整片同樣大小的拼音會黏成一塊、分不出斷句。
+   用 em 讓間距跟著字級一起縮放。
+   跟上面的 display:flex 一樣,屬性一出現就套用,不等到 'done' —— 理由同上。 */
+html[data-romaji-mode='romaji-only'] [data-romaji-processed] {
+  margin-block: 0.5em 0.9em;
+}
+
+/*
+ * 關閉:content script 不會再處理新的行,但先前插入的拼音元素還留在 DOM,
+ * 這裡把它們藏起來並還原原文,達到「只顯示原文日文」的效果。
+ */
+html[data-romaji-mode='off'] .romaji-overlay {
+  display: none;
+}
+
+/* ------------------------------------------------ LRCLIB 浮動歌詞面板 */
+
+/*
+ * Spotify 沒有這首歌的歌詞時,用 LRCLIB 的歌詞自己浮一個面板出來。
+ *
+ * 位置刻意避開底部播放列(bottom 留 104px)與頂部導覽列 ——
+ * 蓋住播放控制項的浮動面板是很惱人的,使用者會被迫先關掉它才能按暫停。
+ *
+ * z-index 比補讀音面板(9999)低一階:在這個面板上點到讀不出來的漢字時,
+ * 補讀音的面板必須疊在它上面,否則點了等於沒反應。
+ */
+.romaji-lrc-panel {
+  position: fixed;
+  z-index: 9998;
+  top: 88px;
+  right: 16px;
+  bottom: 104px;
+  display: flex;
+  flex-direction: column;
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  background: rgba(24, 24, 24, 0.96);
+  border: 1px solid #3a3a3a;
+  border-radius: 12px;
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.6);
+  color: #f2f2f2;
+  font: 13px/1.5 system-ui, "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+  /* 背景半透明時,底下的專輯封面會透上來干擾閱讀 */
+  backdrop-filter: blur(12px);
+  overflow: hidden;
+}
+
+.romaji-lrc-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #2f2f2f;
+}
+
+.romaji-lrc-titles {
+  min-width: 0; /* 沒有這行,底下的 ellipsis 在 flex 子元素裡不會生效 */
+}
+
+.romaji-lrc-title {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/*
+ * 副標要寫明歌詞來自 LRCLIB。
+ *
+ * 這不只是禮貌:使用者看到的歌詞跟 Spotify 播的可能是不同版本
+ * (不同的錄音、不同的斷句),知道來源才有辦法判斷對不上是誰的問題。
+ */
+.romaji-lrc-sub {
+  margin-top: 2px;
+  color: #a0a0a0;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.romaji-lrc-close {
+  flex: none;
+  padding: 0 6px;
+  background: none;
+  border: none;
+  color: #a0a0a0;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.romaji-lrc-close:hover {
+  color: #fff;
+}
+
+.romaji-lrc-close:focus-visible {
+  outline: 2px solid #1db954;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.romaji-lrc-body {
+  flex: 1;
+  margin: 0;
+  padding: 12px 14px 40% 14px; /* 底部留白讓最後幾句也能捲到中間 */
+  list-style: none;
+  overflow-y: auto;
+  overscroll-behavior: contain; /* 捲到底時不要把整個 Spotify 頁面帶著捲 */
+  scrollbar-width: thin;
+  scrollbar-color: #4a4a4a transparent;
+}
+
+.romaji-lrc-line {
+  padding: 5px 0 5px 10px;
+  /* 左緣預留給高亮的那條線,平常是透明的 —— 用透明而不是 0 寬度,
+     這樣正在唱的那一句亮起來時文字不會左右跳一下 */
+  border-left: 2px solid transparent;
+  transition: border-color 0.15s ease;
+}
+
+/*
+ * 正在唱的那一句要看得出來。
+ *
+ * 拼音本身的高亮已經由上面「唱到哪、亮到哪」那幾條規則處理了,
+ * 這裡只補一條左緣的線 —— 在 both / kana 模式下拼音是配角,
+ * 光靠拼音變色不夠明顯,而且原文那一行完全沒有任何標記。
+ */
+.romaji-lrc-line[data-romaji-active='true'] {
+  border-left-color: #1db954;
+}
+
+.romaji-lrc-line .romaji-original {
+  color: #d8d8d8;
+}
+
+.romaji-lrc-line[data-romaji-active='true'] .romaji-original {
+  color: #fff;
+}
+
+/* 螢幕不高時面板會被壓得很扁,不如讓它佔滿可用高度 */
+@media (max-height: 620px) {
+  .romaji-lrc-panel {
+    top: 64px;
+    bottom: 96px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .romaji-lrc-line {
+    transition: none;
+  }
+}
