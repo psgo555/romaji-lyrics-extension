@@ -39,11 +39,11 @@
           <span class="nudge-sub">亮得早一點</span>
         </button>
       </div>
-      <p class="field-hint" id="offset-hint">
-        <strong>覺得太早亮就按左邊,太慢就按右邊。</strong>
-        按鈕一次動 0.5 秒;上面的滑桿可以再微調(一格 0.05 秒)。
-        一邊播一邊調,馬上看得到效果。
-      </p>
+      <!--
+        說明只留「滑桿是拿來幹嘛的」。按鈕上已經寫了「亮得早/晚一點」,
+        再解釋一次就是廢話 —— 使用者看得懂按鈕就不必看說明。
+      -->
+      <p class="field-hint" id="offset-hint">滑桿可微調,一格 0.05 秒</p>
     </section>
 
     <section class="field">
@@ -52,12 +52,17 @@
       </span>
       <ul class="corrections" id="corrections"></ul>
       <p class="field-error" id="corrections-error" role="alert"></p>
-      <p class="field-hint">
-        在歌詞上點紅色波浪底線的字就能新增。這裡可以改讀音或刪掉,只接受假名。
-      </p>
+      <!--
+        「這裡可以改讀音或刪掉」是多餘的 —— 每一列本來就有輸入框和叉叉,
+        看到就知道。只留使用者**猜不到**的那件事:要去哪裡新增。
+      -->
+      <p class="field-hint">在歌詞上點紅色波浪底線的字可新增,只接受假名</p>
     </section>
 
-    <footer class="footer">設定會立即套用,不需要重新整理頁面</footer>
+    <!--
+      頁尾拿掉了。「設定會立即套用」是預設期待,講出來反而讓人懷疑
+      是不是有哪些不會立即套用;而使用者調滑桿時看畫面就知道了。
+    -->
 
     <script src="popup.js"></script>
   </body>

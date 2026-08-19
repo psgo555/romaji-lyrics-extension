@@ -281,8 +281,4 @@ body {
   text-align: center;
 }
 
-.footer {
-  margin-top: 16px;
-  color: var(--muted);
-  font-size: 11px;
-}
+/* .footer 的樣式跟著頁尾文字一起拿掉了(那行字是廢話,見 popup.html) */
