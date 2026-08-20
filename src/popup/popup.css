@@ -169,7 +169,8 @@ body {
   width: 22px;
   height: 22px;
   padding: 0;
-  border: 1px solid var(--border);
+  /* 邊框要比 --border 亮:黑色那顆在 #121212 的底上,沒有這圈就看不見它在哪 */
+  border: 1px solid rgba(255, 255, 255, 0.28);
   border-radius: 50%;
   cursor: pointer;
 }
