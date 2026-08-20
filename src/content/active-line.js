@@ -137,8 +137,12 @@ function byInnerStyle(lines) {
   return signatures.indexOf(unique[0][0]);
 }
 
-/** 往上找真正會捲動的那個祖先 */
-function findScrollParent(el) {
+/**
+ * 往上找真正會捲動的那個祖先。
+ * auto-scroll.js 也要用同一個判斷 —— 標記高亮跟自動置中必須認定同一個容器,
+ * 各找各的話會在 Spotify 改版時默默分岔。
+ */
+export function findScrollParent(el) {
   let node = el?.parentElement;
   while (node && node !== document.body) {
     const { overflowY } = getComputedStyle(node);
