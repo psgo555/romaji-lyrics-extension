@@ -36,7 +36,48 @@ export const DEFAULTS = {
    * 放諸四海皆準的數字,不如讓使用者一邊播一邊拖到看起來對為止。
    */
   sweepMsPerLetter: 180,
+
+  /**
+   * 拼音的顏色(六位十六進位色碼)。
+   *
+   * 為什麼做成可調而不是我選一個好看的:這件事沒有正確答案 ——
+   * 專輯封面的顏色一直在變、每個人對比敏感度不同、有人就是不喜歡綠的。
+   * 預設用 Spotify 綠是為了跟頁面一致,但那只是個起點。
+   */
+  romajiColor: '#1db954',
+
+  /**
+   * 拼音相對於原文的大小(百分比)。
+   *
+   * 不懂假名的人主要在看拼音,把它縮小其實是反過來的;
+   * 但看得懂一些的人又希望原文為主。所以這也交給使用者。
+   */
+  romajiScale: 80,
 };
+
+/** 顏色只接受六位十六進位色碼 */
+const COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
+
+/**
+ * 把顏色正規化。認不得的一律退回預設。
+ *
+ * **這道檢查不能省**:這個值會被寫進頁面的 CSS 變數。雖然 setProperty
+ * 不會執行程式碼,但放行任意字串等於讓儲存裡的內容直接影響頁面樣式 ——
+ * 而那份儲存是跨裝置同步的,不是只有本機。嚴格比對格式,不合就當沒設定。
+ */
+export function normalizeColor(value) {
+  return COLOR_PATTERN.test(value ?? '') ? value.toLowerCase() : DEFAULTS.romajiColor;
+}
+
+/** 拼音大小的合理範圍。太小看不清,太大會把原文擠掉 */
+export const ROMAJI_SCALE_MIN = 60;
+export const ROMAJI_SCALE_MAX = 120;
+
+export function normalizeScale(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return DEFAULTS.romajiScale;
+  return Math.min(ROMAJI_SCALE_MAX, Math.max(ROMAJI_SCALE_MIN, Math.round(number)));
+}
 
 /*
  * ── 為什麼沒有「掃描快慢」這個設定 ────────────────────────────
@@ -172,6 +213,8 @@ export async function getSettings() {
     displayMode: normalizeMode(stored.displayMode),
     syncOffsetMs: normalizeOffset(stored.syncOffsetMs),
     sweepMsPerLetter: normalizeSweepMs(stored.sweepMsPerLetter),
+    romajiColor: normalizeColor(stored.romajiColor),
+    romajiScale: normalizeScale(stored.romajiScale),
   };
 }
 

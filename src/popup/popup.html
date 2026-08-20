@@ -38,6 +38,24 @@
   </section>
 
   <section class="field">
+    <label class="field-label" for="scale">
+      拼音外觀 <output class="field-value" id="scale-value"></output>
+    </label>
+    <div class="appearance">
+      <input type="color" id="color" aria-label="拼音顏色" />
+      <div class="swatches" role="group" aria-label="常用顏色">
+        <button type="button" class="swatch" data-color="#1db954" title="Spotify 綠"></button>
+        <button type="button" class="swatch" data-color="#ffffff" title="白"></button>
+        <button type="button" class="swatch" data-color="#ffd479" title="淡黃"></button>
+        <button type="button" class="swatch" data-color="#7dd3fc" title="淺藍"></button>
+        <button type="button" class="swatch" data-color="#f9a8d4" title="粉紅"></button>
+      </div>
+    </div>
+    <input class="slider" type="range" id="scale" />
+    <p class="field-hint">左邊方塊可自己挑色,滑桿調大小</p>
+  </section>
+
+  <section class="field">
     <span class="field-label">
       自訂讀音 <output class="field-value" id="corrections-count"></output>
     </span>

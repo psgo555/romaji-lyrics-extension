@@ -13,6 +13,10 @@ import {
   SYNC_OFFSET_MIN,
   SYNC_OFFSET_MAX,
   SYNC_OFFSET_STEP,
+  normalizeColor,
+  normalizeScale,
+  ROMAJI_SCALE_MIN,
+  ROMAJI_SCALE_MAX,
   DISPLAY_MODES,
 } from '../shared/settings.js';
 
@@ -37,6 +41,9 @@ import {
 const modesEl = document.getElementById('modes');
 const offsetEl = document.getElementById('offset');
 const offsetValueEl = document.getElementById('offset-value');
+const colorEl = document.getElementById('color');
+const scaleEl = document.getElementById('scale');
+const scaleValueEl = document.getElementById('scale-value');
 const correctionsEl = document.getElementById('corrections');
 const correctionsCountEl = document.getElementById('corrections-count');
 const correctionsErrorEl = document.getElementById('corrections-error');
@@ -72,6 +79,10 @@ function renderModes(current) {
  * 卻忘了改 settings.js 就會變成「滑桿拉得到 3000,存進去被砍回 2000」——
  * 畫面顯示跟實際生效不一致,而且不會有任何錯誤訊息。
  */
+scaleEl.min = String(ROMAJI_SCALE_MIN);
+scaleEl.max = String(ROMAJI_SCALE_MAX);
+scaleEl.step = '5';
+
 offsetEl.min = String(SYNC_OFFSET_MIN);
 offsetEl.max = String(SYNC_OFFSET_MAX);
 offsetEl.step = String(SYNC_OFFSET_STEP);
@@ -143,6 +154,59 @@ function nudgeOffset(deltaMs) {
 for (const id of ['offset-later', 'offset-earlier']) {
   const button = document.getElementById(id);
   button.addEventListener('click', () => nudgeOffset(Number(button.dataset.delta)));
+}
+
+/* ------------------------------------------------------------ 拼音外觀 */
+
+/*
+ * 顏色與大小,跟提前量走同一套節流。
+ *
+ * 色盤跟滑桿都是拖曳型的控制項,拖一次會連發幾十個事件。不節流會把
+ * chrome.storage.sync 的寫入額度用光,而症狀會出現在**完全無關的地方**
+ * (補讀音存不進去)。那個坑已經踩過一次了。
+ */
+let appearanceWriteTimer = null;
+
+function saveAppearanceSoon(key, value) {
+  clearTimeout(appearanceWriteTimer);
+  appearanceWriteTimer = setTimeout(() => {
+    setSetting(key, value).catch((err) => console.warn('[romaji] 寫入外觀設定失敗:', err));
+  }, WRITE_DEBOUNCE_MS);
+}
+
+function renderColor(value) {
+  colorEl.value = value;
+  // 選中的色塊要標出來,不然使用者看不出目前是哪一個
+  for (const swatch of document.querySelectorAll('.swatch')) {
+    swatch.style.background = swatch.dataset.color;
+    swatch.setAttribute('aria-pressed', String(swatch.dataset.color === value));
+  }
+}
+
+function renderScale(value) {
+  scaleEl.value = String(value);
+  scaleValueEl.textContent = `${value}%`;
+}
+
+colorEl.addEventListener('input', () => {
+  const value = normalizeColor(colorEl.value);
+  renderColor(value);
+  saveAppearanceSoon('romajiColor', value);
+});
+
+scaleEl.addEventListener('input', () => {
+  const value = normalizeScale(scaleEl.value);
+  renderScale(value);
+  saveAppearanceSoon('romajiScale', value);
+});
+
+// 色塊只是捷徑,調的是同一個值、走同一條路
+for (const swatch of document.querySelectorAll('.swatch')) {
+  swatch.addEventListener('click', () => {
+    const value = normalizeColor(swatch.dataset.color);
+    renderColor(value);
+    saveAppearanceSoon('romajiColor', value);
+  });
 }
 
 /*
@@ -283,6 +347,8 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'sync') return;
   if (changes.displayMode) renderModes(normalizeMode(changes.displayMode.newValue));
   if (changes.syncOffsetMs) renderOffset(normalizeOffset(changes.syncOffsetMs.newValue));
+  if (changes.romajiColor) renderColor(normalizeColor(changes.romajiColor.newValue));
+  if (changes.romajiScale) renderScale(normalizeScale(changes.romajiScale.newValue));
 });
 
 /*
@@ -300,9 +366,11 @@ onCorrectionsChanged((entries) => {
 });
 
 async function main() {
-  const { displayMode, syncOffsetMs } = await getSettings();
+  const { displayMode, syncOffsetMs, romajiColor, romajiScale } = await getSettings();
   renderModes(displayMode);
   renderOffset(syncOffsetMs);
+  renderColor(romajiColor);
+  renderScale(romajiScale);
 
   renderCorrections(await loadUserCorrections());
 }

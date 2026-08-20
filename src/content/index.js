@@ -60,6 +60,8 @@ import {
   normalizeMode,
   normalizeOffset,
   normalizeSweepMs,
+  normalizeColor,
+  normalizeScale,
   nextMode,
 } from '../shared/settings.js';
 
@@ -113,7 +115,20 @@ function isEnabled() {
 }
 
 function applySettings() {
-  document.documentElement.setAttribute('data-romaji-mode', settings.displayMode);
+  const root = document.documentElement;
+  root.setAttribute('data-romaji-mode', settings.displayMode);
+
+  /*
+   * 外觀走 CSS 變數,不是直接改每個元素的樣式。
+   *
+   * 兩個好處:改設定時只動一個地方(不必走訪幾十行歌詞),而且
+   * **不需要重新轉換** —— 顏色跟大小純粹是顯示,跟拼音的內容無關。
+   *
+   * 值一定要先過 normalize:那份設定是跨裝置同步的,不是只有本機,
+   * 直接把儲存裡的字串塞進樣式等於讓外部資料影響頁面。
+   */
+  root.style.setProperty('--romaji-color', normalizeColor(settings.romajiColor));
+  root.style.setProperty('--romaji-scale', String(normalizeScale(settings.romajiScale)));
 }
 
 /**
@@ -140,6 +155,13 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
   if (changes.sweepMsPerLetter) {
     settings.sweepMsPerLetter = normalizeSweepMs(changes.sweepMsPerLetter.newValue);
+  }
+
+  // 外觀是純顯示,套用 CSS 變數就好 —— 不必重新轉換,所以拖色盤是即時的
+  if (changes.romajiColor || changes.romajiScale) {
+    if (changes.romajiColor) settings.romajiColor = normalizeColor(changes.romajiColor.newValue);
+    if (changes.romajiScale) settings.romajiScale = normalizeScale(changes.romajiScale.newValue);
+    applySettings();
   }
 
   if (!changes.displayMode) return;
