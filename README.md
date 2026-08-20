@@ -112,6 +112,7 @@ yume naraba dorehodo yokatta deshou
 | `npm run build` | 打包到 `dist/` |
 | `npm run watch` | 監看 `src/` 自動重新打包(改靜態檔仍需重跑 build) |
 | `npm run check:imports` | 漏 import 靜態掃描(每次改動都要跑,見下方) |
+| `npm run icons` | 從 `public/icon-source.png` 產生三種尺寸的圖示(換圖時才要跑) |
 | `npm run demo:kana` | 步驟2 的 wanakana 純假名轉換驗證 |
 | `npm run demo:kanji` | 步驟2 的 kuroshiro 漢字轉換驗證 |
 | `npm run demo:corrections` | 讀音修正字典的前後對照 |

@@ -11,7 +11,6 @@
 import { build, context } from 'esbuild';
 import { cp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { deflateSync, crc32 } from 'node:zlib';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -175,111 +174,20 @@ async function copyDictionary() {
 /* ---------------------------------------------------------------- 圖示 */
 
 /*
- * 圖示。
+ * 圖示是預先產好的,放在 public/icons/,這裡只負責複製。
  *
- * 圖案是「上面一條長的、下面一條短的」—— 對應這個擴充功能實際在做的事:
- * 原文在上,拼音在下。刻意只用兩條線條而不畫假名或字母:
- * 16 像素下任何筆畫複雜的東西都會糊成一團,而長短對比在那個尺寸還看得出來。
+ * 為什麼不在這裡即時產生:圖示的來源是一張 1254x1254 的 PNG,
+ * 要去背、裁切、重新取樣才能變成 16/48/128。那些程式不短,
+ * 而圖示幾乎不會變 —— 每次 build 都跑一遍只是浪費時間,也讓這支難讀。
  *
- * 先前這裡是一整塊純綠色(檔案只有 79 bytes),註解自己寫著「佔位」。
- * 自己載來用無所謂,公開發布時使用者在工具列上根本認不出那是什麼。
+ * 換圖的流程:換掉 public/icon-source.png → npm run icons → 產出進版控。
  */
-
-/** 圓角矩形的距離場:回傳負值代表在裡面。用它才能算出邊緣的覆蓋率做去鋸齒。 */
-function roundedRectDistance(px, py, cx, cy, halfW, halfH, radius) {
-  const dx = Math.abs(px - cx) - (halfW - radius);
-  const dy = Math.abs(py - cy) - (halfH - radius);
-  const outside = Math.hypot(Math.max(dx, 0), Math.max(dy, 0));
-  return outside + Math.min(Math.max(dx, dy), 0) - radius;
-}
-
-/**
- * 畫出圖示的 PNG。
- *
- * 用 4×4 超取樣做去鋸齒 —— 直接判斷「在裡面/在外面」的話,圓角跟線條的
- * 邊緣會有明顯的階梯,在 128 像素那張特別醜。
- */
-function iconPng(size) {
-  const chunk = (type, data) => {
-    const head = Buffer.alloc(8);
-    head.writeUInt32BE(data.length, 0);
-    head.write(type, 4, 'ascii');
-    const body = Buffer.concat([head.subarray(4), data]);
-    const tail = Buffer.alloc(4);
-    tail.writeUInt32BE(crc32(body) >>> 0, 0);
-    return Buffer.concat([head.subarray(0, 4), body, tail]);
-  };
-
-  const GREEN = [0x1d, 0xb9, 0x54]; // 跟 popup 的重點色一致
-  const SS = 4; // 每邊取樣次數
-
-  // 全部用 0~1 的比例定義,三種尺寸共用同一份設計
-  const shapes = {
-    background: { cx: 0.5, cy: 0.5, hw: 0.5, hh: 0.5, r: 0.22 },
-    original: { cx: 0.5, cy: 0.38, hw: 0.28, hh: 0.055, r: 0.055 }, // 原文:長
-    romaji: { cx: 0.4, cy: 0.62, hw: 0.18, hh: 0.04, r: 0.04 }, // 拼音:短一點、細一點
-  };
-
-  const inside = (s, x, y) =>
-    roundedRectDistance(x, y, s.cx, s.cy, s.hw, s.hh, s.r) <= 0;
-
-  const raw = Buffer.alloc(size * (size * 4 + 1));
-
-  for (let y = 0; y < size; y += 1) {
-    const rowStart = y * (size * 4 + 1);
-    raw[rowStart] = 0; // filter type: None
-
-    for (let x = 0; x < size; x += 1) {
-      let bgHits = 0;
-      let barHits = 0;
-
-      for (let sy = 0; sy < SS; sy += 1) {
-        for (let sx = 0; sx < SS; sx += 1) {
-          const u = (x + (sx + 0.5) / SS) / size;
-          const v = (y + (sy + 0.5) / SS) / size;
-          if (!inside(shapes.background, u, v)) continue;
-          bgHits += 1;
-          if (inside(shapes.original, u, v) || inside(shapes.romaji, u, v)) barHits += 1;
-        }
-      }
-
-      const total = SS * SS;
-      const p = rowStart + 1 + x * 4;
-
-      if (bgHits === 0) {
-        raw.writeUInt32BE(0, p); // 圓角外面完全透明
-        continue;
-      }
-
-      // 線條是白的,底是綠的,依覆蓋率混色
-      const barRatio = barHits / bgHits;
-      for (let i = 0; i < 3; i += 1) {
-        raw[p + i] = Math.round(GREEN[i] * (1 - barRatio) + 0xff * barRatio);
-      }
-      raw[p + 3] = Math.round((bgHits / total) * 255); // 邊緣的透明度
-    }
+async function copyIcons() {
+  const src = path.join(root, 'public/icons');
+  if (!existsSync(src)) {
+    throw new Error('找不到 public/icons/,請先執行 npm run icons');
   }
-
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(size, 0);
-  ihdr.writeUInt32BE(size, 4);
-  ihdr[8] = 8; // bit depth
-  ihdr[9] = 6; // color type: truecolour + alpha(圓角要透明)
-
-  return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    chunk('IHDR', ihdr),
-    chunk('IDAT', deflateSync(raw)),
-    chunk('IEND', Buffer.alloc(0)),
-  ]);
-}
-
-async function writeIcons() {
-  const dir = path.join(dist, 'icons');
-  await mkdir(dir, { recursive: true });
-  for (const size of [16, 48, 128]) {
-    await writeFile(path.join(dir, `icon${size}.png`), iconPng(size));
-  }
+  await cp(src, path.join(dist, 'icons'), { recursive: true });
 }
 
 /* ---------------------------------------------------------------- 主流程 */
@@ -293,7 +201,7 @@ async function main() {
   await copyDictionary();
   await copyLicenses();
   await copyStatic();
-  await writeIcons();
+  await copyIcons();
 
   if (watch) {
     const ctx = await context(bundleOptions);
