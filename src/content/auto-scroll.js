@@ -1,27 +1,25 @@
 /**
  * auto-scroll.js
- * 換句時,自己把正在唱的那一句捲到畫面中間。
+ * Spotify 沒把正在唱的那一句帶回畫面中間時,補捲一下。
  *
- * ── 為什麼需要 ────────────────────────────────────────────────
- * Spotify 自己也會捲,但它是照**它自己的**播放進度捲的;而我們的高亮是照
- * LRCLIB 的時間軸加上使用者設的提前量算的。兩邊本來就不會同時發生:
- * 高亮跳到下一句的那一刻,那一句還停在畫面下緣,要等 Spotify 追上來
- * 才會被捲到中間 —— 使用者看到的就是「亮了,但還在下面」。
+ * ── 這是補救,不是主力 ────────────────────────────────────────
+ * 捲動本來就該由 Spotify 自己做,而且換句的時機現在已經跟它對錶了
+ * (見 line-anchor.js),所以絕大多數時候它自己會處理好。
  *
- * 再加上我們替每一行插了一列拼音,每個區塊的高度大約變兩倍,
- * 換一句要捲的距離也跟著變兩倍,Spotify 那段平滑捲動就顯得更慢。
+ * 但我們替每一行插了一列拼音,每個區塊的高度大約變兩倍,換一句要捲的
+ * 距離也跟著變兩倍;偶爾會出現它捲得不夠、那一句停在畫面下緣的情況。
+ * 這裡就是為那種時候準備的。
  *
- * 所以這裡不等它,自己捲。
+ * ── 為什麼要等一下再判斷 ────────────────────────────────────
+ * 換句的當下 Spotify 自己的捲動動畫正要開始。那一刻就跟著捲的話,
+ * 兩邊會在同一個容器上互相搶,畫面反而抖。所以先讓它捲,
+ * 等它該做完了再看結果 —— 位置對了就什麼都不做。
  *
  * ── 為什麼目標位置寫死在正中間 ──────────────────────────────
- * 實測 Spotify 捲完之後,正在唱的那一句就停在容器高度的一半上下,
- * 所以「正中間」跟它的落點幾乎一致 —— 兩邊不會互相拉扯,
- * 之後它自己再捲一次也只是幾個 px 的差距,看不出來。
- *
+ * 實測 Spotify 捲完之後,正在唱的那一句就停在容器高度的一半上下。
  * 曾經想過改成「量上一句停在哪、就把下一句放到同一個位置」自我校正,
  * 但那是一個回饋迴路:我們自己捲出來的位置會被當成量測結果再喂回去,
  * 一旦偏掉就會慢慢愈偏愈多,而且很難從畫面上看出是哪裡出問題。
- * 固定值猜錯最多差幾個 px,是比較便宜的錯。
  */
 
 import { findScrollParent } from './active-line.js';
@@ -39,6 +37,14 @@ const FOCUS_RATIO = 0.5;
 const MIN_MOVE_PX = 24;
 
 /**
+ * 換句之後先讓 Spotify 捲這麼久,再看它有沒有捲到位。
+ *
+ * 這是這支模組唯一的存在理由:不跟它搶。它的捲動動畫大約半秒,
+ * 留一點餘裕。等太久使用者會先看到不順,等太短就會打架。
+ */
+const SETTLE_MS = 700;
+
+/**
  * 使用者自己捲動之後,先別跟他搶。
  *
  * 想往回看前面幾句的時候,如果每次換句都把畫面拉回來,
@@ -47,8 +53,13 @@ const MIN_MOVE_PX = 24;
 const USER_SCROLL_GRACE_MS = 4000;
 
 let container = null;
-let lastLineEl = null;
 let userScrolledAt = 0;
+
+/** 正在觀察的那一行,以及它是什麼時候變成正在唱的 */
+let pendingEl = null;
+let pendingAt = 0;
+/** 這一行已經判斷過了,不再重複判斷 */
+let judged = false;
 
 /**
  * 記錄「使用者自己動了」。
@@ -92,24 +103,36 @@ export function scrollDelta(lineBox, viewBox) {
 }
 
 /**
- * 把正在唱的那一句捲到畫面中間。
+ * 檢查正在唱的那一句在不在畫面中間,不在就補捲一下。
  *
- * 同一行重複呼叫不會做事,所以呼叫端每 80ms 叫一次也沒關係 ——
- * 真正會動的只有換句的那一次。
+ * 呼叫端每 80ms 叫一次。換句之後會先等 SETTLE_MS 讓 Spotify 自己捲,
+ * 然後只判斷一次 —— 位置對了就什麼都不做。
  *
  * @param {HTMLElement|null} lineEl 正在唱的那一行
  */
 export function centerActiveLine(lineEl) {
-  if (!lineEl || lineEl === lastLineEl) return;
-  lastLineEl = lineEl;
+  if (!lineEl) return;
+
+  if (lineEl !== pendingEl) {
+    pendingEl = lineEl;
+    pendingAt = performance.now();
+    judged = false;
+    return; // 換句的當下不動,先讓 Spotify 捲
+  }
+
+  if (judged) return;
+  const now = performance.now();
+  if (now - pendingAt < SETTLE_MS) return;
+  judged = true;
 
   const box = attachTo(lineEl);
   if (!box) return; // 歌詞區塊還沒長到需要捲動
 
-  if (performance.now() - userScrolledAt < USER_SCROLL_GRACE_MS) return;
+  // 使用者剛剛自己捲過就先不要搶,等他停手一段時間
+  if (now - userScrolledAt < USER_SCROLL_GRACE_MS) return;
 
   const delta = scrollDelta(lineEl.getBoundingClientRect(), box.getBoundingClientRect());
-  if (Math.abs(delta) < MIN_MOVE_PX) return;
+  if (Math.abs(delta) < MIN_MOVE_PX) return; // Spotify 已經捲到位了
 
   const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   box.scrollBy({ top: delta, behavior: smooth ? 'smooth' : 'auto' });
@@ -125,6 +148,7 @@ export function resetAutoScroll() {
     container?.removeEventListener(type, noteUserScroll);
   }
   container = null;
-  lastLineEl = null;
+  pendingEl = null;
+  judged = false;
   userScrolledAt = 0;
 }

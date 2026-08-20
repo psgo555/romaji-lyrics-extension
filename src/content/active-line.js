@@ -241,6 +241,19 @@ export function findActiveIndex(lines) {
 }
 
 /**
+ * 目前是哪一個策略在當家。
+ *
+ * 呼叫端需要這個是因為最後一招「geometry」的性質跟其他幾個不同:
+ * 它是靠「誰最靠近畫面中間」判斷的,所以只要有人動了捲動位置,
+ * 判斷結果就會跟著變。會捲動畫面的功能必須知道現在是不是走這一招。
+ *
+ * @returns {string|null} 策略名稱,還沒判斷出來時是 null
+ */
+export function activeStrategy() {
+  return winningStrategy;
+}
+
+/**
  * 把 data-romaji-active="true" 標在正在唱的那一行上。
  *
  * 這個屬性是佇列排序唯一的優先權訊號 —— 排序時只要讀屬性,
