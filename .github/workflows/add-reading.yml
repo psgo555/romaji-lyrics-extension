@@ -1,0 +1,83 @@
+# 收下回報的讀音
+#
+# 有人開了「補讀音」的 issue,維護者看過覺得沒問題,就貼一個 approved 標籤 ——
+# 這個流程會把那筆讀音寫進 dictionary.json、commit、回覆並關閉 issue。
+#
+# ── 把關的那一步刻意留給人 ────────────────────────────────────
+# issue 是公開的,誰都能開。如果開了就自動收,等於任何人都能改動
+# 所有使用者畫面上的拼音 —— 而錯的讀音跟對的長得一模一樣,沒人看得出來。
+# 所以觸發條件是「被貼上標籤」,不是「issue 被建立」。
+#
+# ── 標籤 ──────────────────────────────────────────────────────
+#   approved  收下這筆(必要)
+#   global    收成通用條目,對所有歌生效。不貼就是只對那一首歌。
+#             拿不準就別貼 —— 錯了也只錯那一首,通用條目錯了是所有人所有歌。
+
+name: 收下回報的讀音
+
+on:
+  issues:
+    types: [labeled]
+
+# 只給這個流程真正需要的兩個權限
+permissions:
+  contents: write # commit dictionary.json
+  issues: write # 回覆並關閉 issue
+
+# 同一則 issue 連續貼標籤時,不要讓兩個工作同時改同一個檔案
+concurrency:
+  group: add-reading-${{ github.event.issue.number }}
+
+jobs:
+  apply:
+    if: github.event.label.name == 'approved'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 把讀音寫進字典
+        id: apply
+        env:
+          # 用 env 傳,不要直接把內容插進 shell 指令裡 ——
+          # issue 內文是任何人都能寫的,插進指令等於讓他在這台機器上執行東西
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          SCOPE: ${{ contains(github.event.issue.labels.*.name, 'global') && 'global' || 'song' }}
+        run: node tools/apply-reading.mjs
+
+      - name: 確認字典仍然是好的
+        if: steps.apply.outputs.ok == 'true'
+        # 驗證器在上一步已經跑過這一筆了,這裡多跑一次整套測試 ——
+        # 擋的是「這次的改動剛好踩到別的規則」那種情況
+        run: npm test
+
+      - name: Commit
+        if: steps.apply.outputs.ok == 'true'
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add dictionary.json
+          # 沒有變動就不要留一個空的 commit(同一筆重複貼標籤時會遇到)
+          git diff --staged --quiet || git commit -m "補讀音(#${{ github.event.issue.number }})"
+          git push
+
+      - name: 回覆 issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NUMBER: ${{ github.event.issue.number }}
+          OK: ${{ steps.apply.outputs.ok }}
+          MESSAGE: ${{ steps.apply.outputs.message }}
+        run: |
+          if [ "$OK" = "true" ]; then
+            printf '已收下:%s\n\n使用者的瀏覽器最多 12 小時內會自動拿到。\n' "$MESSAGE" \
+              | gh issue comment "$NUMBER" --body-file -
+            gh issue close "$NUMBER" --reason completed
+          else
+            printf '沒有收下:%s\n\n改好之後把 approved 標籤拿掉再貼一次就會重跑。\n' "$MESSAGE" \
+              | gh issue comment "$NUMBER" --body-file -
+            gh issue edit "$NUMBER" --remove-label approved
+          fi
