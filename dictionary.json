@@ -131,5 +131,16 @@
       "note": "Crazy Rainbow (第284-325話 OP) — 僕ら堕天使夢に矢を放つのさ Darling Darling"
     }
   ],
-  "songs": []
+  "songs": [
+    {
+      "title": "燈",
+      "entries": [
+        {
+          "surface": "燈",
+          "reading": "あかり",
+          "note": "燈 — 混濁した気持ち掠れる燈"
+        }
+      ]
+    }
+  ]
 }
