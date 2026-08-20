@@ -69,7 +69,22 @@ function q(selector) {
   return rootEl.querySelector(selector);
 }
 
-/** 原文逐字排出來,已選的高亮。點相鄰的字可以延伸範圍。 */
+/**
+ * 拖曳選取的起點;null 代表現在沒有在拖。
+ * 放在模組層而不是 renderSource 裡面,是因為放開滑鼠的 mouseup 可能發生在
+ * 面板外面(手滑出去了),那一下要由 document 收,兩邊得看同一個變數。
+ */
+let dragAnchor = null;
+
+/**
+ * 原文逐字排出來,已選的高亮。
+ *
+ * 兩種選法:點一下延伸/縮小範圍(適合微調),或是按著拖過去一次選一段
+ * (適合「這四個字是一個詞」這種一眼就知道範圍的情況)。
+ *
+ * 節點只建一次,之後只改 aria-pressed —— 拖曳時每移動一個字就重建整排按鈕的話,
+ * 滑鼠底下的元素會被換掉,mouseenter 會再觸發一次,變成自己餵自己。
+ */
 function renderSource() {
   const container = q('.romaji-fix-source');
   container.replaceChildren();
@@ -79,14 +94,60 @@ function renderSource() {
     button.type = 'button';
     button.className = 'romaji-fix-ch';
     button.textContent = char;
-    button.setAttribute('aria-pressed', String(i >= state.selStart && i < state.selEnd));
+
+    button.addEventListener('mousedown', (event) => {
+      // 不要讓瀏覽器把面板裡的文字選起來,那會蓋掉我們自己的選取提示
+      event.preventDefault();
+      // 只記起點,**不動選取範圍** —— 真的拖了才算拖曳。
+      // 在這裡就把範圍設成這一個字的話,底下「點旁邊的字延伸範圍」會失效:
+      // 每一下都先被重設成單一個字,再也延伸不出去。
+      dragAnchor = i;
+    });
+
+    button.addEventListener('mouseenter', () => {
+      if (dragAnchor === null) return;
+      setSelection(Math.min(dragAnchor, i), Math.max(dragAnchor, i) + 1);
+    });
+
+    /*
+     * 點一下:延伸或縮小範圍(原本的行為)。
+     *
+     * 跨了好幾個字的拖曳不會走到這裡 —— 按下與放開在不同元素上時,
+     * click 會派給共同的祖先而不是按鈕本身。原地按放才算點擊,那時
+     * 一次 mouseenter 都沒發生過,範圍還是原樣,extendSelection 的判斷才正確。
+     */
     button.addEventListener('click', () => {
       extendSelection(i);
-      renderSource();
+      paintSelection();
       schedulePreview();
     });
+
     container.appendChild(button);
   });
+
+  paintSelection();
+}
+
+/** 只更新哪些字是選中的,不動節點 */
+function paintSelection() {
+  if (!rootEl) return;
+  const buttons = rootEl.querySelectorAll('.romaji-fix-ch');
+  buttons.forEach((button, i) => {
+    button.setAttribute('aria-pressed', String(i >= state.selStart && i < state.selEnd));
+  });
+}
+
+function setSelection(start, end) {
+  if (state.selStart === start && state.selEnd === end) return; // 沒變就不要重畫
+  state.selStart = start;
+  state.selEnd = end;
+  paintSelection();
+  schedulePreview();
+}
+
+/** 放開滑鼠就結束拖曳,不管放在哪裡 */
+function endDrag() {
+  dragAnchor = null;
 }
 
 /**
@@ -278,6 +339,8 @@ export function isPopoverOpen() {
 export function closeCorrectionPopover() {
   if (!rootEl) return;
   clearTimeout(previewTimer);
+  document.removeEventListener('mouseup', endDrag, true);
+  dragAnchor = null;
   rootEl.remove();
   rootEl = null;
   state = null;
@@ -322,6 +385,9 @@ export function openCorrectionPopover({
   rootEl = buildSkeleton();
   rootEl.querySelector('.romaji-fix-title').textContent = title;
   document.body.appendChild(rootEl);
+
+  // 拖到一半滑出面板外面才放開,也要算結束 —— 掛在 document 上才收得到
+  document.addEventListener('mouseup', endDrag, true);
 
   // 放在點擊處下方,超出畫面就往回收
   const left = Math.min(
