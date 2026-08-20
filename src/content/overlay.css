@@ -562,6 +562,79 @@ html[data-romaji-mode='off'] .romaji-overlay {
   display: none;
 }
 
+/* ------------------------------------------------ 角落的提示 */
+
+/*
+ * 位置刻意跟 LRCLIB 面板分邊站(它靠右,這個靠左),
+ * 而且一樣避開底部播放列 —— 蓋住播放控制項的浮動元素很惱人。
+ *
+ * z-index 比那兩個面板低一階:提示只是講一句話,
+ * 任何需要操作的東西都該疊在它上面。
+ */
+.romaji-notice {
+  position: fixed;
+  z-index: 9997;
+  left: 16px;
+  bottom: 104px;
+  max-width: 320px;
+  padding: 12px 34px 12px 14px; /* 右邊留給關閉鈕 */
+  background: rgba(24, 24, 24, 0.96);
+  border: 1px solid #3a3a3a;
+  border-left: 3px solid #1db954;
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  color: #f2f2f2;
+  font: 13px/1.5 system-ui, "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+  backdrop-filter: blur(12px);
+  animation: romaji-notice-in 0.18s ease-out;
+}
+
+@keyframes romaji-notice-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .romaji-notice {
+    animation: none;
+  }
+}
+
+.romaji-notice-title {
+  font-weight: 600;
+}
+
+.romaji-notice-body {
+  margin-top: 3px;
+  color: #b8b8b8;
+  font-size: 12px;
+}
+
+.romaji-notice-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 0 5px;
+  background: none;
+  border: none;
+  color: #a0a0a0;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.romaji-notice-close:hover {
+  color: #fff;
+}
+
+.romaji-notice-close:focus-visible {
+  outline: 2px solid #1db954;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
 /* ------------------------------------------------ LRCLIB 浮動歌詞面板 */
 
 /*

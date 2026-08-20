@@ -20,6 +20,7 @@ import {
 import { syncToggleButton, renderToggleButton } from './toggle-button.js';
 import { markActive } from './active-line.js';
 import { centerActiveLine, resetAutoScroll } from './auto-scroll.js';
+import { showNotice, hideNotice } from './notice.js';
 import { startClock, stopClock, getPositionMs, getDurationMs } from './playback-clock.js';
 import { parseLrc } from './lrc.js';
 import {
@@ -817,6 +818,22 @@ function resetLrcState() {
   pendingLrc = null;
   // 換歌時歌詞容器會被換掉,自動置中記著的舊容器與舊行都要一併丟掉
   resetAutoScroll();
+  // 上一首的提示留到下一首會變成假訊息
+  hideNotice();
+}
+
+/**
+ * 告訴使用者這首歌不會逐字亮。
+ *
+ * 為什麼要講:那是**正常的**(資料就是沒有),但畫面上看起來跟壞掉一樣,
+ * 而且「延遲校正」滑桿在這種歌上怎麼拖都沒反應 ——
+ * 不講的話,使用者的結論會是「這個擴充功能時好時壞」。
+ *
+ * 關掉轉換時不講:那時畫面上根本沒有拼音,講了只是莫名其妙。
+ */
+function noticeNoTimeline(title, body) {
+  if (!isEnabled()) return;
+  showNotice(title, body);
 }
 
 /** 這一句唱到什麼時候結束(下一句開始)。最後一句沒有下一句就給個合理的長度。 */
@@ -861,6 +878,10 @@ async function requestLrc(nowPlaying, key) {
     }
     if (!res?.synced) {
       console.info(`${LOG} LRCLIB 沒有這首歌的時間軸,高亮改用觀察畫面的方式`);
+      noticeNoTimeline(
+        '這首歌沒有同步歌詞',
+        '拼音照常顯示,但不會跟著歌聲逐字亮,設定裡的「延遲校正」在這首歌上也沒有作用。'
+      );
       return;
     }
 
@@ -892,6 +913,10 @@ function alignIfNeeded(lines) {
     );
     setLineTimes(null);
     pendingLrc = null;
+    noticeNoTimeline(
+      '這首歌的同步歌詞對不上',
+      '找到的時間軸可能是別的版本(Live、重製或不同剪輯)。拼音照常顯示,但不會跟著歌聲逐字亮。'
+    );
     return;
   }
 
@@ -1267,6 +1292,7 @@ function shutdown() {
   observer = null;
   stopClock();
   resetAutoScroll();
+  hideNotice();
   closeCorrectionPopover();
   // 面板留在畫面上但已經沒有東西在更新它了,那比沒有面板更誤導
   closeLrcPanel();
