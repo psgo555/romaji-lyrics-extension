@@ -305,11 +305,11 @@ kuromoji 的內建辭典(IPADIC)對某些固定讀法的詞會給出「技術上
 | `both` | 原文 + 下方羅馬拼音 | 兩者都顯示 |
 | `off` | 關閉 | 只顯示原文日文,完全不做轉換、不插入任何元素 |
 
-另外有一個**高亮提前量**滑桿(`syncOffsetMs`,預設 900ms,範圍 -500~2000)。高亮比歌聲慢就往右拉、太早就往左拉,**一邊播一邊拖就會即時生效**,不必重新整理也不必重新 build。
+另外有一個**高亮提前量**滑桿(`syncOffsetMs`,預設 0,範圍 -500~2000)。高亮比歌聲慢就往右拉、太早就往左拉,**一邊播一邊拖就會即時生效**,不必重新整理也不必重新 build。
 
 之所以做成可調而不是寫死:Spotify 顯示的秒數本身就落後真實音訊、系統音訊輸出有緩衝、跟唱的人還需要先看到字才唱得出來(卡拉OK 本來就會提前給詞)。這些疊加起來因人因機器而異,沒有一個通用值。
 
-設定存在 `chrome.storage.sync`(`displayMode` 與 `syncOffsetMs`),content script 透過 `storage.onChanged` 立即套用,不需重新整理頁面。
+設定存在 `chrome.storage.sync`(`displayMode`、`syncOffsetMs`、`romajiColor`、`romajiScale` 等),content script 透過 `storage.onChanged` 立即套用,不需重新整理頁面。顏色與大小走 CSS 變數,連重新轉換都不用。
 
 ### 頁面上的切換鈕
 
