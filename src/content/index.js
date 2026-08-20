@@ -23,7 +23,6 @@ import {
 } from './correction-popover.js';
 import { syncToggleButton, renderToggleButton } from './toggle-button.js';
 import { markActive } from './active-line.js';
-import { centerActiveLine, resetAutoScroll } from './auto-scroll.js';
 import { showNotice, hideNotice } from './notice.js';
 import { startClock, stopClock, getPositionMs, getDurationMs } from './playback-clock.js';
 import { parseLrc } from './lrc.js';
@@ -951,8 +950,6 @@ function resetLrcState() {
   lineCurves = [];
   alignedCount = 0;
   pendingLrc = null;
-  // 換歌時歌詞容器會被換掉,自動置中記著的舊容器與舊行都要一併丟掉
-  resetAutoScroll();
   // 上一首的提示留到下一首會變成假訊息
   hideNotice();
 }
@@ -1193,14 +1190,23 @@ function updateActiveLine() {
   });
 
   /*
-   * Spotify 的捲動跟它的高亮一樣是遲到的,所以換句之後它常常還沒把
-   * 這一句帶回畫面中間。等它一下,還是沒到位就自己補捲。
+   * ── 這裡曾經有一段「自己把正在唱的那句捲到畫面中間」──────────
    *
-   * **只有走時間軸這條路才做。** 另一條路(上面的 markActive 退路)是靠
-   * 觀察畫面判斷正在唱哪一行的,而其中一個策略就是「誰最靠近畫面中間」——
-   * 在那條路上自動置中會變成自問自答。有獨立的時間來源時才有資格插手捲動。
+   * 拿掉了,因為它會把 Spotify 自己的自動捲動弄壞。
+   *
+   * 那個容器是 Spotify 在管的,而**捲動事件分不出來源** —— 我們呼叫
+   * scrollBy 跟使用者滾滑鼠,對它來說長得一模一樣。它一旦認定「使用者
+   * 自己捲了」就會停掉自動置中,而且那個狀態會留著。
+   *
+   * 症狀很難聯想到這裡:有時間軸的歌看不出來(我們自己在捲,補上了),
+   * 壞掉的是**沒有時間軸的歌** —— 那時我們不捲,而 Spotify 已經被我們
+   * 教會「不要捲了」。使用者看到的是「內建的跟唱置中不見了」,
+   * 跟拼音一點關係都沒有。
+   *
+   * 當初加它是為了解決「換句後兩秒才捲到中間」,但那個延遲後來查清楚
+   * 是 Spotify 自己的高亮遲到,已經改用 CSS 解決(見 overlay.css 的
+   * data-romaji-synced)。既然病因不在捲動,就不該用捲動去補。
    */
-  if (active >= 0) centerActiveLine(lines[active]);
 }
 
 /**
@@ -1438,7 +1444,6 @@ function shutdown() {
   observer?.disconnect();
   observer = null;
   stopClock();
-  resetAutoScroll();
   hideNotice();
   closeCorrectionPopover();
   // 面板留在畫面上但已經沒有東西在更新它了,那比沒有面板更誤導
