@@ -52,13 +52,37 @@ const listeners = new Set();
 import { isValidReading } from './reading.js';
 export { READING_PATTERN, isValidReading } from './reading.js';
 
+// 曲名的正規化必須跟驗證那一支用同一份 —— 各寫一份的話,
+// 字典裡收的曲名跟這裡查的曲名會在空白或大小寫上悄悄對不上。
+import { normalizeSongTitle } from '../shared/shared-dictionary.js';
+
 /** 大家共用的那份(從 GitHub 抓回來的),還沒抓到之前是空的 */
 let shared = [];
 
 /**
- * 把三層合成一份生效清單。
+ * 共用字典裡**限定單曲**的條目,{ 正規化曲名: [{surface, reading}] }。
  *
- * 優先順序:**使用者自己的 > 共用的 > 內建的**
+ * 為什麼要分這一層:回報的人沒辦法判斷一筆修正在別的歌裡安不安全。
+ * 「失 → な」在某首歌是對的,全域生效卻會讓失敗變成なはい。
+ * 綁在一首歌上就不必判斷 —— 錯了也只錯那一首,而同一首歌的其他人
+ * 直接拿到修好的結果,不必每個人再修一次。
+ */
+let sharedSongs = {};
+
+/** 現在在播哪一首(正規化過的曲名) */
+let currentSong = '';
+
+function songEntries(title) {
+  return sharedSongs[title] ?? [];
+}
+
+/**
+ * 把四層合成一份生效清單。
+ *
+ * 優先順序:**使用者自己的 > 這首歌專屬的 > 共用通用的 > 內建的**
+ *
+ * 這首歌專屬的排在通用的前面,是因為它更具體:有人特地為這首歌回報,
+ * 代表通用那筆在這首歌裡不對(或根本沒有)。具體的規則本來就該蓋過概括的。
  *
  * 為什麼使用者最大:他看得到自己那首歌的實際結果,而共用字典是為了
  * 「大多數情況」收的。萬一某個詞在他聽的歌裡是另一種讀法,
@@ -68,12 +92,18 @@ let shared = [];
  * 共用那份改完幾小時內就到。同一個詞兩邊都有時,新的那份比較可能是修好的。
  */
 function merge() {
+  const song = songEntries(currentSong);
+
   const userSurfaces = new Set(Object.keys(entries));
+  const songSurfaces = new Set(song.map((s) => s.surface));
   const sharedSurfaces = new Set(shared.map((s) => s.surface));
 
+  const taken = (surface) => userSurfaces.has(surface) || songSurfaces.has(surface);
+
   const list = [
-    ...BUILTIN.filter((b) => !userSurfaces.has(b.surface) && !sharedSurfaces.has(b.surface)),
-    ...shared.filter((s) => !userSurfaces.has(s.surface)),
+    ...BUILTIN.filter((b) => !taken(b.surface) && !sharedSurfaces.has(b.surface)),
+    ...shared.filter((s) => !taken(s.surface)),
+    ...song.filter((s) => !userSurfaces.has(s.surface)),
     ...Object.entries(entries).map(([surface, reading]) => ({ surface, reading })),
   ];
   setActiveCorrections(list);
@@ -92,15 +122,18 @@ export async function loadSharedDictionary() {
   try {
     const res = await chrome.runtime.sendMessage({ type: 'FETCH_DICTIONARY' });
     const next = Array.isArray(res?.entries) ? res.entries : [];
-    if (!next.length) return false;
+    const nextSongs = res?.songs && typeof res.songs === 'object' ? res.songs : {};
+    if (!next.length && !Object.keys(nextSongs).length) return false;
 
     // 內容一樣就什麼都不用做
     const same =
       next.length === shared.length &&
-      next.every((e, i) => e.surface === shared[i]?.surface && e.reading === shared[i]?.reading);
+      next.every((e, i) => e.surface === shared[i]?.surface && e.reading === shared[i]?.reading) &&
+      sameSongs(nextSongs, sharedSongs);
     if (same) return false;
 
     shared = next;
+    sharedSongs = nextSongs;
     merge();
     notify();
     return true;
@@ -108,6 +141,46 @@ export async function loadSharedDictionary() {
     console.warn(`${LOG} 取得共用字典失敗,只用內建的:`, err);
     return false;
   }
+}
+
+/** 兩份限定單曲的條目一不一樣。只比目前這首,其他首換了也不影響畫面。 */
+function sameSongs(a, b) {
+  const left = a[currentSong] ?? [];
+  const right = b[currentSong] ?? [];
+  return (
+    left.length === right.length &&
+    left.every((e, i) => e.surface === right[i]?.surface && e.reading === right[i]?.reading)
+  );
+}
+
+/**
+ * 換歌了。回傳生效清單有沒有跟著變 —— 變了才需要重轉畫面上的歌詞。
+ *
+ * 沒有專屬條目的歌佔絕大多數,所以這裡幾乎都回 false;
+ * 那正是重點:不要為了換歌就把每一行重轉一次,那會讓頁面卡一下。
+ *
+ * @param {string} title 曲名(原樣傳進來即可,正規化在裡面做)
+ * @returns {boolean}
+ */
+export function setCurrentSong(title) {
+  const next = normalizeSongTitle(title);
+  if (next === currentSong) return false;
+
+  const before = songEntries(currentSong);
+  currentSong = next;
+  const after = songEntries(next);
+
+  // 兩邊都沒有專屬條目,合併結果一定一樣,不必重算也不必通知
+  if (!before.length && !after.length) return false;
+
+  merge();
+  notify();
+  return true;
+}
+
+/** 這首歌有幾筆專屬條目。給畫面上提示用的。 */
+export function getSongCorrectionCount() {
+  return songEntries(currentSong).length;
 }
 
 function notify() {

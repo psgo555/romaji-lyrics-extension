@@ -311,15 +311,27 @@ function shareCorrection() {
     return;
   }
 
+  /*
+   * 曲名自動帶進來,而且回報預設就是**限定這首歌**。
+   *
+   * ── 為什麼不讓回報的人選「要不要全域生效」──────────────────
+   * 因為他判斷不了。「失 → な」在他這首歌是對的,全域生效卻會讓
+   * 失敗變成なはい —— 要判斷得先想過這個字在別的詞裡怎麼讀,
+   * 那等於這個功能只有懂日文的人能用。
+   *
+   * 所以回報的人只需要說「這首歌的這個詞唸這樣」,那是他**看得到**的事實;
+   * 要不要提升成通用條目由收 issue 的人決定,那才是需要判斷的部分。
+   */
   const body = [
     '<!-- 這是自動填好的,確認沒問題就直接送出 -->',
     '',
+    `- 曲名:${state.songTitle || '(請補上)'}`,
     `- 原文:\`${surface}\``,
     `- 讀音:\`${reading}\``,
     `- 這一句:${state.lineText}`,
     '',
-    '（如果知道是哪首歌,補在這裡會更好查證）',
-    '曲名 / 歌手:',
+    '這筆修正**只會套用在上面那首歌**,不影響其他歌。',
+    '如果這個詞不管哪首歌都該這樣讀,請在下面說一聲,會改成通用條目。',
   ].join('\n');
 
   const url =
@@ -372,6 +384,7 @@ export function openCorrectionPopover({
   anchor,
   guardKeydown,
   title = '補上讀音',
+  songTitle = '',
 }) {
   closeCorrectionPopover();
 
@@ -379,7 +392,7 @@ export function openCorrectionPopover({
   const at = lineText.indexOf(surface);
   const start = at < 0 ? 0 : [...lineText.slice(0, at)].length;
 
-  state = { lineText, chars, selStart: start, selEnd: start + [...surface].length };
+  state = { lineText, chars, selStart: start, selEnd: start + [...surface].length, songTitle };
   guardKey = guardKeydown;
 
   rootEl = buildSkeleton();

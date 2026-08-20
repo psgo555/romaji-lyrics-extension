@@ -11,7 +11,11 @@
 
 import { toRomaji, toKana, ready, invalidateRomajiCache } from './romaji.js';
 import { findUnromanized, findUnreadKanji, toLetterRanges } from './cjk.js';
-import { onCorrectionsChanged, loadSharedDictionary } from './corrections-store.js';
+import {
+  onCorrectionsChanged,
+  loadSharedDictionary,
+  setCurrentSong,
+} from './corrections-store.js';
 import {
   openCorrectionPopover,
   closeCorrectionPopover,
@@ -536,6 +540,7 @@ async function onRomajiClick(event) {
       surface: unknownChar.dataset.romajiSurface ?? '',
       anchor: unknownChar.getBoundingClientRect(),
       guardKeydown: guardEditKey,
+      songTitle: readNowPlaying()?.trackName ?? '',
     });
     return;
   }
@@ -612,6 +617,7 @@ async function onRomajiDblClick(event) {
     anchor: (event.target.closest?.('.romaji-ch') ?? event.target).getBoundingClientRect(),
     guardKeydown: guardEditKey,
     title: '修正讀音',
+    songTitle: readNowPlaying()?.trackName ?? '',
   });
 
   // 用掉就丟。留著的話,下一次在同一行雙擊會把一段早就不相干的舊選取端出來
@@ -1307,6 +1313,16 @@ function tick() {
   const trackKey = nowPlaying ? `${nowPlaying.trackName}|${nowPlaying.artistName}` : null;
   if (trackKey !== currentTrackKey) {
     currentTrackKey = trackKey;
+
+    /*
+     * 共用字典裡有些條目是**限定這首歌**的,換歌就要換一套。
+     *
+     * 只有在這首歌真的有專屬條目(或上一首有)時才回 true,那時
+     * onCorrectionsChanged 會把畫面重轉一次。絕大多數的歌沒有專屬條目,
+     * 回 false、什麼都不做 —— 不然每次換歌都白重轉一次,頁面會卡一下。
+     */
+    setCurrentSong(nowPlaying?.trackName ?? '');
+
     resetLrcState();
     lrcAskedFor = null;
     emptyTicks = 0;
