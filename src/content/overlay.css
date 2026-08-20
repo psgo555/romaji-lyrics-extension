@@ -610,6 +610,9 @@ html[data-romaji-mode='off'] .romaji-overlay {
   margin-top: 3px;
   color: #b8b8b8;
   font-size: 12px;
+  /* 訊息裡的換行是刻意排的(哪句該獨立成一行),要保留;
+     其餘照樣自動換行,視窗窄的時候才不會被截掉 */
+  white-space: pre-line;
 }
 
 .romaji-notice-close {

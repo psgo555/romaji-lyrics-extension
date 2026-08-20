@@ -880,7 +880,8 @@ async function requestLrc(nowPlaying, key) {
       console.info(`${LOG} LRCLIB 沒有這首歌的時間軸,高亮改用觀察畫面的方式`);
       noticeNoTimeline(
         '這首歌沒有同步歌詞',
-        '拼音照常顯示,但不會跟著歌聲逐字亮,設定裡的「延遲校正」在這首歌上也沒有作用。'
+        // 換行是刻意的:兩件事分開講才看得清楚(overlay.css 用 pre-line 保留它)
+        '拼音照常顯示,但不會跟著歌聲逐字亮。\n設定裡的「延遲校正」拖了也不會有變化。'
       );
       return;
     }
@@ -915,7 +916,8 @@ function alignIfNeeded(lines) {
     pendingLrc = null;
     noticeNoTimeline(
       '這首歌的同步歌詞對不上',
-      '找到的時間軸可能是別的版本(Live、重製或不同剪輯)。拼音照常顯示,但不會跟著歌聲逐字亮。'
+      '找到的時間軸可能是別的版本(Live、重製或不同剪輯)。拼音照常顯示,但不會跟著歌聲逐字亮。' +
+        '\n設定裡的「延遲校正」拖了也不會有變化。'
     );
     return;
   }
