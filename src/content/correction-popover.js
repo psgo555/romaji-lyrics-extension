@@ -207,7 +207,16 @@ async function runPreview() {
   // 使用者可能打的是羅馬拼音,先轉成假名再判斷
   const reading = toKanaReading(q('.romaji-fix-input').value);
   const surface = selectedSurface();
-  const candidate = reading && isValidReading(reading) ? { surface, reading } : null;
+
+  /*
+   * 範圍有問題就**不要組出候選條目**。
+   *
+   * 尤其是空的 surface:那會讓取代的迴圈永遠不前進,分頁當場 Out of Memory
+   * (雙擊開面板時範圍預設是空的,使用者一邊打字一邊預覽就會踩到)。
+   * corrections.js 那邊也擋了,但那是最後一道防線 ——
+   * 明知道這一筆不能用還餵下去,本來就沒有道理。
+   */
+  const candidate = !problem && reading && isValidReading(reading) ? { surface, reading } : null;
 
   // 把轉出來的假名顯示出來 —— 打羅馬拼音的人要看到它變成什麼,
   // 否則轉錯了也不知道是哪一步出問題
