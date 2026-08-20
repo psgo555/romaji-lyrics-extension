@@ -455,11 +455,18 @@ async function processLyricsLine(lineEl) {
 /* ------------------------------------------------------- 手動切分拼音 */
 
 /*
- * 兩種操作方式共用同一套切點位置系統(splitter.js 的 boundary),
- * 切換動作也共用同一個 toggleBoundary(),不各寫一套。
+ * 切字只有一個動作:**空白鍵**。
  *
- * 滑鼠:點一下就在該處插入/取消空格(原本的行為)。
- * 鍵盤:進入編輯模式後用左右鍵移動游標、空白鍵切換、Enter/Esc 離開。
+ * 滑鼠負責定位與選取:點一下把游標放到那個位置(不切字)、拖曳選取文字、
+ * 雙擊開修正面板。左右鍵移動游標,Enter/Esc 離開。
+ *
+ * ── 為什麼把「點一下就切」拿掉 ──────────────────────────────
+ * 那個設計讓滑鼠沒辦法做別的事:想選一段拼音起來看、想雙擊編輯,
+ * 每一下都會順手切一刀,而且要退回去還得再點一次同一個位置。
+ * 一個會改資料的動作不該綁在最容易誤觸的操作上。
+ *
+ * 切點的位置系統(splitter.js 的 boundary)與切換動作(toggleBoundary)
+ * 仍然只有一份,滑鼠定位與鍵盤切換共用,不各寫一套。
  */
 
 /** 目前正在鍵盤編輯的那一行,null 代表沒有 */
@@ -471,15 +478,10 @@ let editingOverlay = null;
  */
 let pointerActive = false;
 
-/**
- * 上一次點擊切出來的切點,雙擊時要把它撤回。
- *
- * 雙擊在瀏覽器裡是 click → click → dblclick,所以使用者想「雙擊編輯」的時候,
- * 第一下已經先插了一個空格進去。等 dblclick 才知道他的意圖,那時只能收回來 ——
- * 記下位置而不是重算,是因為兩次點擊的座標會差幾個像素,重算有可能算到別的切點,
- * 那會變成「撤銷了一個他沒動過的地方」。
+/*
+ * 這裡曾經有一個 lastToggle,用來在雙擊時撤回「第一下點擊插進去的切點」。
+ * 滑鼠不再切字之後就不需要了 —— 沒有東西要撤回,也就沒有猜錯撤回位置的風險。
  */
-let lastToggle = null;
 
 /** 把目前畫面上的切分寫回 storage */
 async function persistSplits(overlay) {
@@ -555,20 +557,26 @@ async function onRomajiClick(event) {
   const boundary = boundaryFromClick(event, letters.length);
   if (boundary === null) return;
 
-  // 攔住,不要讓 Spotify 以為使用者要跳轉播放位置
+  /*
+   * 攔住,不要讓 Spotify 以為使用者要跳轉播放位置。
+   *
+   * 這一行不影響選取 —— 選取是在 mousedown/mousemove 就完成的,
+   * 到 click 的時候早已定案,preventDefault 攔的是「跳轉播放」那個動作。
+   */
   event.preventDefault();
   event.stopPropagation();
 
-  const alreadyEditing = editingOverlay === overlay;
-
-  // 編輯模式中,滑鼠只負責移動游標 —— 暫停點擊切分,
-  // 免得跟鍵盤操作互相干擾(離開編輯模式後又會恢復)
+  /*
+   * 點一下**只放游標,不切字**。
+   *
+   * 先前是點到哪就在哪插空格。那個設計的問題是使用者沒辦法用滑鼠做
+   * 任何別的事:想選一段拼音起來看、想雙擊編輯,每一下都會順手切一刀,
+   * 而且要退回去還得再點一次同一個位置。
+   *
+   * 現在滑鼠回到它本來的角色(選取、定位),切字一律交給空白鍵 ——
+   * 那是一個明確的、不會誤觸的動作。游標還是要放,否則空白鍵不知道要切哪裡。
+   */
   enterEditMode(overlay, boundary);
-  if (alreadyEditing) return;
-
-  toggleBoundary(overlay, boundary);
-  lastToggle = { overlay, boundary };
-  await persistSplits(overlay);
 }
 
 /**
@@ -584,40 +592,56 @@ async function onRomajiClick(event) {
  *
  * ── 跟切分功能的關係 ──────────────────────────────────────
  * 面板開著的時候,點拼音只會把面板關掉(onRomajiClick 開頭的 handleOutsideClick),
- * 不會插空格 —— 也就是使用者說的「編輯時不能用切分」。
- * 而雙擊的第一下已經插進去的那個切點,在這裡收回。
+ * 不會動到切分。而滑鼠本身已經不再切字了,所以雙擊不必再收拾什麼。
  */
 async function onRomajiDblClick(event) {
-  const overlay = event.target?.closest?.('.romaji-overlay');
-  if (!overlay) return;
+  const lineEl = event.target?.closest?.('[data-romaji-source]');
+  const overlay = lineEl?.querySelector(':scope > .romaji-overlay');
+  if (!lineEl || !overlay) return;
 
-  // 攔住,不然瀏覽器會把整個詞選起來、Spotify 也可能收到這一下
+  // 攔住,不然 Spotify 也可能收到這一下
   event.preventDefault();
   event.stopPropagation();
-
-  if (lastToggle?.overlay === overlay) {
-    toggleBoundary(overlay, lastToggle.boundary);
-    await persistSplits(overlay);
-  }
-  lastToggle = null;
 
   // 鍵盤編輯模式跟修正面板不並存 —— 兩邊都要吃方向鍵與 Enter
   await exitEditMode();
 
-  /*
-   * 範圍留空,由使用者自己在面板上點出要修的詞。
-   *
-   * 這裡不猜:轉換過程沒有留下「這幾個拼音字母來自原文的哪幾個字」的對應,
-   * 只能照比例估。估錯的預選比沒有預選更糟 —— 使用者會以為那就是我們認定的詞,
-   * 直接填讀音存下去,結果修到隔壁那個字。
-   */
   openCorrectionPopover({
-    lineText: overlay.parentElement?.dataset?.romajiSource ?? '',
-    surface: '',
-    anchor: (event.target.closest?.('.romaji-ch') ?? overlay).getBoundingClientRect(),
+    lineText: lineEl.dataset.romajiSource ?? '',
+    surface: surfaceFromSelection(lineEl),
+    anchor: (event.target.closest?.('.romaji-ch') ?? event.target).getBoundingClientRect(),
     guardKeydown: guardEditKey,
     title: '修正讀音',
   });
+}
+
+/**
+ * 使用者在雙擊之前選了哪一段原文。
+ *
+ * ── 為什麼只認原文的選取,不認拼音的 ──────────────────────
+ * 修正存的是「原文的這個詞唸什麼」,所以要的是**原文**的範圍。
+ * 而拼音那邊反推不回去:轉換過程沒有留下「這幾個字母來自原文哪幾個字」
+ * 的對應關係,只能照比例估 —— 估錯的預選比沒有預選更糟,使用者會以為
+ * 那就是我們認定的詞,直接填讀音存下去,結果修到隔壁那個字。
+ *
+ * 所以選原文才算數。選不到(純拼音模式看不到原文、或根本沒選)就回空字串,
+ * 面板會請使用者在上面自己拉範圍 —— 那裡拖曳選取是通的。
+ *
+ * ── 為什麼要限定在同一行裡 ──────────────────────────────
+ * 跨行的選取拼不出一個詞。而且 indexOf 找的是這一行的原文,
+ * 帶著別行的字進去只會找不到、退回從頭選,反而更莫名其妙。
+ */
+function surfaceFromSelection(lineEl) {
+  const selection = window.getSelection?.();
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) return '';
+
+  const range = selection.getRangeAt(0);
+  const original = lineEl.querySelector(':scope > .romaji-original');
+  if (!original || !original.contains(range.commonAncestorContainer)) return '';
+
+  const text = selection.toString().trim();
+  // 選到的東西一定要真的出現在這一行的原文裡,否則面板會找不到位置
+  return text && (lineEl.dataset.romajiSource ?? '').includes(text) ? text : '';
 }
 
 /** Tab 切過來也要進編輯模式(滑鼠造成的 focus 交給 click 處理,免得重複) */

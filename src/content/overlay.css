@@ -31,8 +31,14 @@
   cursor: text;
 }
 
-/* 滑到哪個字母,就提示會切在它的哪一邊 */
-.romaji-ch:hover {
+/*
+ * 滑到哪個字母,就提示會切在它的哪一邊。
+ *
+ * 只在編輯模式下提示。滑鼠已經不會切字了(切字只認空白鍵),
+ * 平常還亮著這個底色等於在說「點我會有事發生」—— 而點下去只會放游標,
+ * 那個承諾是假的。
+ */
+.romaji-overlay.is-editing .romaji-ch:hover {
   background: rgba(29, 185, 84, 0.18);
   border-radius: 2px;
 }
@@ -580,7 +586,6 @@ html[data-romaji-mode='off'] .romaji-overlay {
   padding: 12px 34px 12px 14px; /* 右邊留給關閉鈕 */
   background: rgba(24, 24, 24, 0.96);
   border: 1px solid #3a3a3a;
-  border-left: 3px solid #1db954;
   border-radius: 10px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
   color: #f2f2f2;
