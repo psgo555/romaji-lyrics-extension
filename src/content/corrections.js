@@ -124,6 +124,20 @@ export function applyCorrectionsWith(text, list) {
   // 改成比對到就把那一段**消耗掉**,長詞才真的保護得住短詞。
   outer: while (index < text.length) {
     for (const { surface, reading } of list) {
+      /*
+       * 空的原文一定要擋掉,否則這個迴圈**永遠不會結束**。
+       *
+       * startsWith('') 恆為 true,而 index += 0 —— 於是每一圈都把 reading
+       * 再接一次到 result 上,字串無限長大,分頁直接 Out of Memory。
+       *
+       * 這不是假想:修正面板用雙擊打開時範圍預設是空的,使用者一邊打讀音
+       * 一邊即時預覽,那個「空原文 + 合法讀音」的組合就會走到這裡。
+       * (實際發生過,整個 Spotify 分頁當掉。)
+       *
+       * 呼叫端也擋了一層,但**這裡才是能保證迴圈會前進的地方** ——
+       * 上面那層漏掉任何一條路,症狀都是當機,而不是顯示一則錯誤訊息。
+       */
+      if (!surface) continue;
       if (!text.startsWith(surface, index)) continue;
       result += reading;
       index += surface.length;

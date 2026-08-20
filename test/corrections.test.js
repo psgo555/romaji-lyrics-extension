@@ -147,3 +147,30 @@ test('使用者的同名項目覆蓋內建的', () => {
   ]);
   assert.equal(applyCorrectionsWith('二人', merged), 'にんげん');
 });
+
+/* ------------------------------------------------- 讓迴圈一定會前進 */
+
+/*
+ * ⚠️ 下面這一條若失敗,是**當掉**而不是紅字。
+ *
+ * 取代的迴圈靠 index += surface.length 前進;surface 是空字串時
+ * startsWith('') 恆為 true 而 index 不動,於是無限接字串直到記憶體耗盡。
+ * 同步的無窮迴圈攔不住,timeout 也叫不醒它 —— 所以 CI 的工作另外設了
+ * timeout-minutes,免得一次手滑把 runner 佔住好幾小時。
+ */
+test('空的原文不會讓取代陷入無限迴圈', { timeout: 2000 }, () => {
+  /*
+   * 真實案例:修正面板用雙擊打開時範圍預設是空的,使用者一邊打讀音
+   * 一邊即時預覽 —— 那個「空原文 + 合法讀音」的組合直接把 Spotify 分頁
+   * 打成 Out of Memory。面板那邊已經擋了,但保證迴圈會前進是這裡的責任。
+   */
+  assert.equal(applyCorrectionsWith('燈', [{ surface: '', reading: 'あかり' }]), '燈');
+});
+
+test('空的原文不影響同一份清單裡其他正常的條目', () => {
+  const list = sortCorrections([
+    { surface: '', reading: 'あかり' },
+    { surface: '二人', reading: 'ふたり' },
+  ]);
+  assert.equal(applyCorrectionsWith('二人', list), 'ふたり');
+});

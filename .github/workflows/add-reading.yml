@@ -32,6 +32,10 @@ jobs:
   apply:
     if: github.event.label.name == 'approved'
     runs-on: ubuntu-latest
+    # 測試裡有一條在驗「取代的迴圈一定會前進」。萬一那個保護被拿掉,
+    # 那是一個同步的無窮迴圈 —— timeout 叫不醒它,工作會一直掛著。
+    # 這行是為了那種時候:最多佔十分鐘,不要把 runner 綁走好幾小時。
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@v4
