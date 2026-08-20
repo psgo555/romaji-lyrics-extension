@@ -787,6 +787,19 @@ async function drain() {
 
 /** 跟畫面上每一行一一對應的起始時間(毫秒);null 代表現在沒有可用的時間軸 */
 let lineTimes = null;
+
+/**
+ * 換時間軸一律走這裡,不要直接指派。
+ *
+ * 因為「現在有沒有可用的時間軸」這件事 CSS 也要知道:有的時候要把
+ * Spotify 自己那個遲到的高亮蓋掉,由我們統一標記(見 overlay.css);
+ * 沒有的時候絕對不能蓋 —— 那時它是唯一的訊號。
+ * 兩個地方各自維護狀態遲早會分岔,所以綁在同一支函式裡。
+ */
+function setLineTimes(next) {
+  lineTimes = next;
+  document.documentElement.toggleAttribute('data-romaji-synced', Boolean(next));
+}
 /** 跟畫面上每一行一一對應的逐字進度折線;沒有逐字資料的行是 null */
 let lineCurves = [];
 /** 對齊時用的行數,行數變了就要重新對齊 */
@@ -798,7 +811,7 @@ let pendingLrc = null;
 
 
 function resetLrcState() {
-  lineTimes = null;
+  setLineTimes(null);
   lineCurves = [];
   alignedCount = 0;
   pendingLrc = null;
@@ -877,12 +890,12 @@ function alignIfNeeded(lines) {
       `${LOG} 時間軸跟畫面上的歌詞對不上(只對到 ${Math.round(matchRate * 100)}%),` +
         '可能不是同一個版本,高亮改用觀察畫面的方式'
     );
-    lineTimes = null;
+    setLineTimes(null);
     pendingLrc = null;
     return;
   }
 
-  lineTimes = fillGaps(times);
+  setLineTimes(fillGaps(times));
   lineCurves = words.map(buildWordCurve);
 
   const withWords = lineCurves.filter(Boolean).length;

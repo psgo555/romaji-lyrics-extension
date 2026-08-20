@@ -405,6 +405,56 @@ html[data-romaji-mode='kana'] [data-romaji-active='true'] .romaji-overlay {
 }
 
 /*
+ * ---- 蓋掉 Spotify 自己那個遲到的高亮 ----
+ *
+ * ── 實測(2026-08,使用者對照畫面回報)────────────────────────
+ * 拼音掃過去的時機跟歌聲是**對得上的**,但 Spotify 把日文那行變白、
+ * 微微放大的動作大約晚兩秒才發生。
+ *
+ * 這一點有另一次實驗當佐證:曾經把換句的時機改成「跟著 Spotify 的高亮走」,
+ * 結果整份拼音變成慢好幾秒。兩邊互相印證 —— 遲到的是它,不是我們。
+ *
+ * 同一個畫面上兩個高亮、還差兩秒,使用者只會覺得壞掉;那個「跳一下」
+ * 也是它放大正在唱那一行造成的,本來是正常效果,時間對不上就變成雜訊。
+ * 所以在我們自己有時間軸可用的時候,把它那份蓋掉,改由我們統一標。
+ *
+ * ── data-romaji-synced 是什麼 ────────────────────────────────
+ * 「現在有可用的時間軸」。沒有這個旗標的時候**絕對不能蓋** ——
+ * 那時 Spotify 的高亮是唯一的訊號,而且 active-line.js 正是靠讀這些
+ * 樣式差異判斷哪一行在唱的,蓋掉等於把自己的眼睛遮起來。
+ *
+ * 選擇器裡的 [data-testid="lyrics-line"] 要跟 index.js 的 LINE_SELECTOR
+ * 一致 —— Spotify 改版換掉那個名字時兩邊都要改。
+ */
+
+/*
+ * 放大效果拿掉。只套在歌詞行本身,不動它外面的容器 ——
+ * Spotify 的捲動動畫有可能是靠外層的 transform 做的,那個不能碰。
+ */
+html[data-romaji-synced] [data-testid="lyrics-line"] {
+  transform: none !important;
+}
+
+/*
+ * 顏色要連內層一起蓋。高亮是套在 Spotify 自己的內層元素上,
+ * 只蓋 .romaji-original 這一層是蓋不到的(見 active-line.js 的 spotifyInner)。
+ * -webkit-text-fill-color 也要一起 —— 它的優先權比 color 高,漏掉就白蓋。
+ */
+html[data-romaji-synced] [data-testid="lyrics-line"] .romaji-original,
+html[data-romaji-synced] [data-testid="lyrics-line"] .romaji-original * {
+  color: rgba(255, 255, 255, 0.5) !important;
+  -webkit-text-fill-color: rgba(255, 255, 255, 0.5) !important;
+  opacity: 1 !important;
+}
+
+/* 換我們自己標。data-romaji-active 是照時間軸算的,跟拼音的掃描同一個時鐘。 */
+html[data-romaji-synced] [data-testid="lyrics-line"][data-romaji-active='true'] .romaji-original,
+html[data-romaji-synced] [data-testid="lyrics-line"][data-romaji-active='true'] .romaji-original * {
+  color: #fff !important;
+  -webkit-text-fill-color: #fff !important;
+}
+
+/*
  * ---- 平假名注音模式 ----
  *
  * 給「看得懂假名、只卡在漢字」的人。它跟 both 的版面一樣(原文在上、
