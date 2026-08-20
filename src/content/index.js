@@ -613,35 +613,71 @@ async function onRomajiDblClick(event) {
     guardKeydown: guardEditKey,
     title: '修正讀音',
   });
+
+  // 用掉就丟。留著的話,下一次在同一行雙擊會把一段早就不相干的舊選取端出來
+  lastOriginalSelection = null;
 }
 
 /**
- * 使用者在雙擊之前選了哪一段原文。
+ * 使用者最後一次選起來的原文。
  *
- * ── 為什麼只認原文的選取,不認拼音的 ──────────────────────
- * 修正存的是「原文的這個詞唸什麼」,所以要的是**原文**的範圍。
- * 而拼音那邊反推不回去:轉換過程沒有留下「這幾個字母來自原文哪幾個字」
- * 的對應關係,只能照比例估 —— 估錯的預選比沒有預選更糟,使用者會以為
- * 那就是我們認定的詞,直接填讀音存下去,結果修到隔壁那個字。
+ * ── 為什麼要另外記,不能等雙擊時再讀 ────────────────────────
+ * 因為那時候已經沒了。滑鼠選好一段之後再雙擊,事件順序是
+ * mousedown → mouseup(選取在這裡被收掉,變成一個游標點)→ mousedown → dblclick,
+ * 等 dblclick 派過來時,選取只剩下「瀏覽器替第二下自動選的那個詞」,
+ * 使用者辛苦拉出來的範圍早就不見了。
  *
- * 所以選原文才算數。選不到(純拼音模式看不到原文、或根本沒選)就回空字串,
- * 面板會請使用者在上面自己拉範圍 —— 那裡拖曳選取是通的。
- *
- * ── 為什麼要限定在同一行裡 ──────────────────────────────
- * 跨行的選取拼不出一個詞。而且 indexOf 找的是這一行的原文,
- * 帶著別行的字進去只會找不到、退回從頭選,反而更莫名其妙。
+ * 所以在**捕獲階段的 mousedown** 就先抄下來 —— 那一刻還早於瀏覽器動手。
+ * 只在抄得到東西時才覆寫:雙擊的第二下讀到的是空的,
+ * 讓它覆寫等於自己把剛抄好的擦掉。
  */
-function surfaceFromSelection(lineEl) {
-  const selection = window.getSelection?.();
-  if (!selection || selection.isCollapsed || selection.rangeCount === 0) return '';
+let lastOriginalSelection = null;
 
-  const range = selection.getRangeAt(0);
-  const original = lineEl.querySelector(':scope > .romaji-original');
-  if (!original || !original.contains(range.commonAncestorContainer)) return '';
+/**
+ * 現在選著的是哪一行原文的哪一段?不是原文就回 null。
+ *
+ * 只認原文的選取,不認拼音的:修正存的是「原文的這個詞唸什麼」,
+ * 而拼音那邊反推不回去 —— 轉換沒有留下「這幾個字母來自原文哪幾個字」
+ * 的對應關係,只能照比例估,估錯的預選比沒有預選更糟。
+ *
+ * 也一定要能定位到某一行:跨行的選取拼不出一個詞,而且面板是拿這段文字
+ * 去該行原文裡找位置的,帶著別行的字進去只會找不到。
+ */
+function selectedOriginalText() {
+  const selection = window.getSelection?.();
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) return null;
+
+  const node = selection.getRangeAt(0).commonAncestorContainer;
+  const el = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+  const lineEl = el?.closest?.('.romaji-original')?.closest?.('[data-romaji-source]');
+  if (!lineEl) return null;
 
   const text = selection.toString().trim();
   // 選到的東西一定要真的出現在這一行的原文裡,否則面板會找不到位置
-  return text && (lineEl.dataset.romajiSource ?? '').includes(text) ? text : '';
+  if (!text || !(lineEl.dataset.romajiSource ?? '').includes(text)) return null;
+
+  return { lineEl, text };
+}
+
+/** 捕獲階段的 mousedown:趕在瀏覽器收掉選取之前先抄下來 */
+function rememberSelection() {
+  const found = selectedOriginalText();
+  if (found) lastOriginalSelection = found;
+}
+
+/**
+ * 雙擊時要預選哪一段原文。
+ *
+ * 先看**現在**選著什麼 —— 直接雙擊日文時,瀏覽器會替使用者把那個詞選起來,
+ * 那正好就是他要修的東西。沒有的話才用先前抄下來的拖曳選取。
+ *
+ * 兩者都要求是同一行,都對不上就回空字串,面板會請使用者自己在上面拉範圍。
+ */
+function surfaceFromSelection(lineEl) {
+  const live = selectedOriginalText();
+  if (live?.lineEl === lineEl) return live.text;
+  if (lastOriginalSelection?.lineEl === lineEl) return lastOriginalSelection.text;
+  return '';
 }
 
 /** Tab 切過來也要進編輯模式(滑鼠造成的 focus 交給 click 處理,免得重複) */
@@ -757,7 +793,15 @@ function registerSplitInteractions() {
   // 全部用捕獲階段委派在 document 上:
   // Spotify 會不斷重建歌詞行,掛在個別元素上的 listener 會跟著被丟掉;
   // 捕獲階段才能搶在 Spotify 自己的點擊/快捷鍵處理之前。
-  document.addEventListener('mousedown', () => { pointerActive = true; }, true);
+  document.addEventListener(
+    'mousedown',
+    () => {
+      pointerActive = true;
+      // 這一下之後瀏覽器就會把選取收掉,要抄趁現在(見 lastOriginalSelection)
+      rememberSelection();
+    },
+    true
+  );
   document.addEventListener('mouseup', () => { pointerActive = false; }, true);
   document.addEventListener('click', onRomajiClick, true);
   document.addEventListener('dblclick', onRomajiDblClick, true);

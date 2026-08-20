@@ -132,6 +132,32 @@ export function getCaret(overlayEl) {
 export function setCaret(overlayEl, caret) {
   const letters = overlayEl.dataset.romajiLetters ?? '';
   const next = caret == null ? null : clampCaret(caret, letters.length);
+
+  /*
+   * 只搬游標,不重建節點。
+   *
+   * ── 為什麼這件事很重要 ──────────────────────────────────
+   * 原本這裡是整排重畫。移游標本身看不出差別,但重畫會把節點換掉,
+   * 而那會連帶弄壞兩件跟游標無關的事:
+   *
+   * 1. 使用者用滑鼠拖出來的文字選取會當場消失。
+   * 2. 雙擊發不出來 —— 雙擊是 click → click → dblclick,第一下之後
+   *    節點就被換掉了,第二下落在一顆新的元素上,瀏覽器算不出這兩下
+   *    的共同目標,dblclick 就不會派送。實測就是「雙擊完全沒反應」。
+   *
+   * 字母數沒變的時候沒有理由重畫,搬一個屬性就夠了。
+   */
+  const spans = overlayEl.querySelectorAll(`.${CHAR_CLASS}`);
+  if (spans.length === letters.length) {
+    spans.forEach((span, i) => {
+      if (i === next) span.dataset.caret = 'true';
+      else if (span.dataset.caret) delete span.dataset.caret;
+    });
+    overlayEl.dataset.romajiCaret = next == null ? '' : String(next);
+    return next;
+  }
+
+  // 節點數對不上(還沒 render 過、或內容剛換掉)才整個重畫
   renderRomaji(overlayEl, letters, readBoundaries(overlayEl), next);
   return next;
 }
