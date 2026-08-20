@@ -471,6 +471,16 @@ let editingOverlay = null;
  */
 let pointerActive = false;
 
+/**
+ * 上一次點擊切出來的切點,雙擊時要把它撤回。
+ *
+ * 雙擊在瀏覽器裡是 click → click → dblclick,所以使用者想「雙擊編輯」的時候,
+ * 第一下已經先插了一個空格進去。等 dblclick 才知道他的意圖,那時只能收回來 ——
+ * 記下位置而不是重算,是因為兩次點擊的座標會差幾個像素,重算有可能算到別的切點,
+ * 那會變成「撤銷了一個他沒動過的地方」。
+ */
+let lastToggle = null;
+
 /** 把目前畫面上的切分寫回 storage */
 async function persistSplits(overlay) {
   const source = overlay.parentElement?.dataset?.romajiSource;
@@ -557,7 +567,57 @@ async function onRomajiClick(event) {
   if (alreadyEditing) return;
 
   toggleBoundary(overlay, boundary);
+  lastToggle = { overlay, boundary };
   await persistSplits(overlay);
+}
+
+/**
+ * 雙擊拼音 → 開修正面板,自己改讀音。
+ *
+ * ── 為什麼是改「讀音」而不是直接改拼音字母 ────────────────────
+ * 直覺上「拼音錯了就讓他改拼音」最單純,但那樣改出來的東西只對這一句有效:
+ * 換一首歌、甚至同一首歌的翻唱版(斷句不同)就對不上,又要再改一次。
+ *
+ * 拼音是從讀音推出來的。改讀音等於改在源頭 —— 存的是「這個詞唸什麼」,
+ * 之後**任何歌**出現同一個詞都會是對的,而且能直接分享給其他使用者。
+ * 所以雙擊打開的是同一個修正面板,只是換一個標題。
+ *
+ * ── 跟切分功能的關係 ──────────────────────────────────────
+ * 面板開著的時候,點拼音只會把面板關掉(onRomajiClick 開頭的 handleOutsideClick),
+ * 不會插空格 —— 也就是使用者說的「編輯時不能用切分」。
+ * 而雙擊的第一下已經插進去的那個切點,在這裡收回。
+ */
+async function onRomajiDblClick(event) {
+  const overlay = event.target?.closest?.('.romaji-overlay');
+  if (!overlay) return;
+
+  // 攔住,不然瀏覽器會把整個詞選起來、Spotify 也可能收到這一下
+  event.preventDefault();
+  event.stopPropagation();
+
+  if (lastToggle?.overlay === overlay) {
+    toggleBoundary(overlay, lastToggle.boundary);
+    await persistSplits(overlay);
+  }
+  lastToggle = null;
+
+  // 鍵盤編輯模式跟修正面板不並存 —— 兩邊都要吃方向鍵與 Enter
+  await exitEditMode();
+
+  /*
+   * 範圍留空,由使用者自己在面板上點出要修的詞。
+   *
+   * 這裡不猜:轉換過程沒有留下「這幾個拼音字母來自原文的哪幾個字」的對應,
+   * 只能照比例估。估錯的預選比沒有預選更糟 —— 使用者會以為那就是我們認定的詞,
+   * 直接填讀音存下去,結果修到隔壁那個字。
+   */
+  openCorrectionPopover({
+    lineText: overlay.parentElement?.dataset?.romajiSource ?? '',
+    surface: '',
+    anchor: (event.target.closest?.('.romaji-ch') ?? overlay).getBoundingClientRect(),
+    guardKeydown: guardEditKey,
+    title: '修正讀音',
+  });
 }
 
 /** Tab 切過來也要進編輯模式(滑鼠造成的 focus 交給 click 處理,免得重複) */
@@ -676,6 +736,7 @@ function registerSplitInteractions() {
   document.addEventListener('mousedown', () => { pointerActive = true; }, true);
   document.addEventListener('mouseup', () => { pointerActive = false; }, true);
   document.addEventListener('click', onRomajiClick, true);
+  document.addEventListener('dblclick', onRomajiDblClick, true);
   document.addEventListener('focusin', onRomajiFocusIn, true);
   document.addEventListener('focusout', onRomajiFocusOut, true);
   document.addEventListener('keydown', onRomajiKeydown, true);

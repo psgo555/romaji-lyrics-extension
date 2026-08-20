@@ -40,10 +40,10 @@ function buildSkeleton() {
   root.className = 'romaji-fix';
   root.innerHTML = `
     <div class="romaji-fix-head">
-      <span class="romaji-fix-title">補上讀音</span>
+      <span class="romaji-fix-title"></span>
       <button type="button" class="romaji-fix-close" aria-label="關閉">×</button>
     </div>
-    <p class="romaji-fix-hint">點原文可調整範圍,要涵蓋<b>整個詞</b>才不會斷錯</p>
+    <p class="romaji-fix-hint">點下面的原文選出範圍,要涵蓋<b>整個詞</b>才不會斷錯</p>
     <div class="romaji-fix-source" role="group" aria-label="選擇要修正的範圍"></div>
     <input class="romaji-fix-input" type="text"
            placeholder="打羅馬拼音就好,例如 shin no zou"
@@ -122,6 +122,17 @@ function schedulePreview() {
  * @returns {string|null} 不能補時回傳要顯示的原因
  */
 function selectionProblem() {
+  /*
+   * 什麼都沒選中。
+   *
+   * 從「點紅色底線的字」進來時範圍是預先選好的,不會走到這裡;
+   * 但雙擊拼音進來時是空的 —— 那條路必須由使用者自己指出要修哪個詞,
+   * 因為拼音反推不回原文的哪一段(轉換不保留對應關係)。
+   * 沒有這道防線的話,空字串會被當成一筆讀音存進去。
+   */
+  if (!selectedSurface()) {
+    return '先點下面的原文,選出要修的那個詞';
+  }
   if (isIterationMarkOnly(selectedSurface())) {
     return '「々」這種疊字符要跟前面的字一起選 —— 它讀什麼取決於前一個字';
   }
@@ -280,7 +291,25 @@ export function closeCorrectionPopover() {
  * @param {(event: KeyboardEvent) => void} options.guardKeydown
  *        重用 index.js 的按鍵防護,避免在輸入框打空格時觸發 Spotify 播放/暫停
  */
-export function openCorrectionPopover({ lineText, surface, anchor, guardKeydown }) {
+/**
+ * 打開修正面板。
+ *
+ * @param {object} options
+ * @param {string} options.lineText 整句原文,選詞器就是把它逐字攤開
+ * @param {string} options.surface 預先選好的範圍;空字串代表「讓使用者自己選」
+ * @param {DOMRect} options.anchor 面板要貼在哪個位置下方
+ * @param {Function} [options.guardKeydown] index.js 的按鍵防護
+ * @param {string} [options.title] 標題。兩種進入點要講的事情不一樣 ——
+ *   點紅底線的字是「這個詞讀不出來」,雙擊拼音是「這個詞讀錯了」。
+ *   標題若一律寫「補上讀音」,後者會讓使用者以為自己點錯功能。
+ */
+export function openCorrectionPopover({
+  lineText,
+  surface,
+  anchor,
+  guardKeydown,
+  title = '補上讀音',
+}) {
   closeCorrectionPopover();
 
   const chars = [...lineText];
@@ -291,6 +320,7 @@ export function openCorrectionPopover({ lineText, surface, anchor, guardKeydown 
   guardKey = guardKeydown;
 
   rootEl = buildSkeleton();
+  rootEl.querySelector('.romaji-fix-title').textContent = title;
   document.body.appendChild(rootEl);
 
   // 放在點擊處下方,超出畫面就往回收
