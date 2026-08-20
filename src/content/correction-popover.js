@@ -24,6 +24,7 @@ import { addUserCorrection, isValidReading } from './corrections-store.js';
 import { previewRomaji } from './romaji.js';
 import { toKanaReading } from './reading.js';
 import { isIterationMarkOnly } from './cjk.js';
+import { nextSelection } from './selection-range.js';
 
 const PREVIEW_DEBOUNCE_MS = 200;
 const PANEL_WIDTH = 320;
@@ -43,7 +44,7 @@ function buildSkeleton() {
       <span class="romaji-fix-title"></span>
       <button type="button" class="romaji-fix-close" aria-label="關閉">×</button>
     </div>
-    <p class="romaji-fix-hint">點下面的原文選出範圍,要涵蓋<b>整個詞</b>才不會斷錯</p>
+    <p class="romaji-fix-hint">點一下＝選到這個字為止,拖曳＝選一段。要涵蓋<b>整個詞</b></p>
     <div class="romaji-fix-source" role="group" aria-label="選擇要修正的範圍"></div>
     <input class="romaji-fix-input" type="text"
            placeholder="打羅馬拼音就好,例如 shin no zou"
@@ -150,17 +151,10 @@ function endDrag() {
   dragAnchor = null;
 }
 
-/**
- * 點某個字時怎麼調整範圍。
- * 選取必須是連續的一段 —— 中間有洞的話取代出來的結果沒有意義。
- */
 function extendSelection(index) {
-  const width = state.selEnd - state.selStart;
-  if (index < state.selStart) state.selStart = index;
-  else if (index >= state.selEnd) state.selEnd = index + 1;
-  // 點在選取範圍的邊緣就往內縮,方便調小
-  else if (index === state.selStart && width > 1) state.selStart += 1;
-  else if (index === state.selEnd - 1 && width > 1) state.selEnd -= 1;
+  const next = nextSelection({ start: state.selStart, end: state.selEnd }, index);
+  state.selStart = next.start;
+  state.selEnd = next.end;
 }
 
 function selectedSurface() {
