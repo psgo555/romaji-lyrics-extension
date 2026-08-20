@@ -26,6 +26,18 @@ import { isValidReading, isIterationMarkOnly } from '../content/cjk.js';
 export const SUPPORTED_VERSION = 1;
 
 /*
+ * ── 為什麼加了 songs 卻**不**改版本號 ──────────────────────────
+ * songs 是一個新的頂層欄位,舊版擴充功能只讀 entries、根本不會看它,
+ * 所以舊版拿到新檔案仍然完全正確 —— 只是少了限定單曲的那些條目。
+ *
+ * 改版本號反而更糟:舊版的規則是「認不得的版本整份不要」,
+ * 那會讓所有還沒更新的人連原本能用的全域條目也一起失去。
+ *
+ * 判斷標準是**舊版會不會做出錯的事**,不是「格式有沒有變」。
+ * 哪天要改的是 entries 本身的意義,那時才非改版本號不可。
+ */
+
+/*
  * 數量與長度上限。
  *
  * 不是怕檔案大,是怕**出事的時候**:萬一有一筆 surface 長達幾萬字,
@@ -36,6 +48,27 @@ const MAX_ENTRIES = 5000;
 const MAX_SURFACE_LENGTH = 40;
 const MAX_READING_LENGTH = 60;
 
+/** 限定單曲的條目:同樣的理由,只是分成兩層來限 */
+const MAX_SONGS = 2000;
+const MAX_ENTRIES_PER_SONG = 200;
+const MAX_TITLE_LENGTH = 200;
+
+/**
+ * 曲名的比對用寫法。
+ *
+ * ── 為什麼只看曲名,不看歌手 ────────────────────────────────
+ * 因為翻唱版要吃得到同一筆修正。同一首歌換一個人唱,歌詞是一樣的,
+ * 讀錯的字也會一樣讀錯 —— 綁上歌手等於每個版本都要有人再報一次。
+ *
+ * 撞名的風險很小:條目要生效,除了曲名相同,那個詞還得真的出現在
+ * 這首歌的歌詞裡。兩首同名的歌又剛好有同一個詞才會誤中,
+ * 而即使誤中了,影響也只在那一首歌,不像全域條目會波及所有人所有歌。
+ */
+export function normalizeSongTitle(title) {
+  if (typeof title !== 'string') return '';
+  return title.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
 /**
  * 把抓回來的內容驗成一份可以用的修正表。
  *
@@ -44,7 +77,7 @@ const MAX_READING_LENGTH = 60;
  *          結構有問題時 entries 是空陣列 —— 呼叫端就退回內建字典
  */
 export function parseSharedDictionary(raw) {
-  const empty = { entries: [], skipped: 0 };
+  const empty = { entries: [], songs: {}, skipped: 0 };
 
   if (!raw || typeof raw !== 'object') return empty;
   if (raw.version !== SUPPORTED_VERSION) return empty; // 認不得的版本整份不要
@@ -67,7 +100,66 @@ export function parseSharedDictionary(raw) {
   // 超過上限被截掉的那些也算跳過,數字才誠實
   skipped += Math.max(0, raw.entries.length - MAX_ENTRIES);
 
-  return { entries, skipped };
+  const songs = parseSongs(raw.songs, (n) => {
+    skipped += n;
+  });
+
+  return { entries, songs, skipped };
+}
+
+/**
+ * 限定單曲的條目。
+ *
+ * ── 為什麼需要這一層 ──────────────────────────────────────
+ * 回報的人沒有辦法判斷一筆修正在**別的**歌裡安不安全。
+ * 「失 → な」在某首歌是對的,可是一旦全域生效,失敗會變成なはい。
+ * 要求每個回報的人都想清楚這件事,等於這個功能只有懂日文的人能用。
+ *
+ * 綁在一首歌上就不必判斷了:錯了也只錯那一首,而同一首歌的其他人
+ * 直接拿到修好的結果,不必每個人再修一次 —— 那正是共用字典的意義。
+ *
+ * 全域條目仍然保留,給「不管哪首歌都該這樣讀」的詞(人名、固定讀法)。
+ *
+ * @param {unknown} raw dictionary.json 的 songs 欄位;沒有就當空的
+ * @param {(count: number) => void} countSkipped 把跳過的筆數回報給呼叫端
+ * @returns {Record<string, Array<{surface: string, reading: string}>>}
+ */
+function parseSongs(raw, countSkipped) {
+  if (!Array.isArray(raw)) return {}; // 沒有這個欄位是正常的,不是錯誤
+
+  const songs = {};
+
+  for (const song of raw.slice(0, MAX_SONGS)) {
+    if (!song || typeof song !== 'object') {
+      countSkipped(1);
+      continue;
+    }
+
+    const title = normalizeSongTitle(song.title);
+    if (!title || title.length > MAX_TITLE_LENGTH || !Array.isArray(song.entries)) {
+      countSkipped(Array.isArray(song.entries) ? song.entries.length : 1);
+      continue;
+    }
+
+    // 同一首歌出現兩次時把條目併起來,不要讓後面那筆整個蓋掉前面的
+    const list = songs[title] ?? [];
+    const seen = new Set(list.map((e) => e.surface));
+
+    for (const item of song.entries.slice(0, MAX_ENTRIES_PER_SONG)) {
+      if (!isUsableEntry(item, seen)) {
+        countSkipped(1);
+        continue;
+      }
+      seen.add(item.surface);
+      list.push({ surface: item.surface, reading: item.reading });
+    }
+
+    countSkipped(Math.max(0, song.entries.length - MAX_ENTRIES_PER_SONG));
+    if (list.length) songs[title] = list;
+  }
+
+  countSkipped(Math.max(0, raw.length - MAX_SONGS));
+  return songs;
 }
 
 /**

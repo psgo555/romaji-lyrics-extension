@@ -10,7 +10,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { parseSharedDictionary, SUPPORTED_VERSION } from '../src/shared/shared-dictionary.js';
+import {
+  parseSharedDictionary,
+  normalizeSongTitle,
+  SUPPORTED_VERSION,
+} from '../src/shared/shared-dictionary.js';
 
 const ok = (entries) => ({ version: SUPPORTED_VERSION, entries });
 
@@ -146,4 +150,104 @@ test('只有疊字符的條目擋下來(資料層也要擋,不能只靠面板)',
   assert.equal(entries.length, 1);
   assert.equal(entries[0].surface, '時々');
   assert.equal(skipped, 1);
+});
+
+/* ------------------------------------------------- 限定單曲的條目 */
+
+test('限定單曲的條目照曲名分組', () => {
+  const { songs } = parseSharedDictionary({
+    version: SUPPORTED_VERSION,
+    entries: [],
+    songs: [{ title: '失くしたもの', entries: [{ surface: '失', reading: 'な' }] }],
+  });
+  assert.deepEqual(songs['失くしたもの'], [{ surface: '失', reading: 'な' }]);
+});
+
+test('單獨一個漢字在限定單曲時是允許的', () => {
+  /*
+   * 這是這一層存在的理由。「失 → な」放進通用條目會讓失敗變成なはい,
+   * 但綁在一首歌上就沒有那個風險 —— 而回報的人正是判斷不了這件事的人。
+   */
+  const { songs } = parseSharedDictionary({
+    version: SUPPORTED_VERSION,
+    entries: [],
+    songs: [{ title: 'x', entries: [{ surface: '失', reading: 'な' }] }],
+  });
+  assert.equal(songs['x'].length, 1);
+});
+
+test('曲名比對不分大小寫、前後空白,翻唱才吃得到', () => {
+  assert.equal(normalizeSongTitle('  Lemon  '), 'lemon');
+  assert.equal(normalizeSongTitle('A  B'), 'a b'); // 連續空白收成一個
+  assert.equal(normalizeSongTitle(null), '');
+});
+
+test('沒有 songs 欄位是正常的,不是壞掉', () => {
+  // 舊版的字典檔沒有這一欄,不能因此把整份丟掉
+  const { entries, songs } = parseSharedDictionary({
+    version: SUPPORTED_VERSION,
+    entries: [{ surface: '響めき', reading: 'どよめき' }],
+  });
+  assert.equal(entries.length, 1);
+  assert.deepEqual(songs, {});
+});
+
+test('限定單曲的條目一樣擋掉疊字符', () => {
+  // 々 讀什麼取決於前一個字,綁在單曲上也一樣會弄壞那首歌裡的其他詞
+  const { songs } = parseSharedDictionary({
+    version: SUPPORTED_VERSION,
+    entries: [],
+    songs: [{ title: 'x', entries: [{ surface: '々', reading: 'どき' }] }],
+  });
+  assert.deepEqual(songs, {});
+});
+
+test('壞掉的讀音只跳過那一筆,同一首歌的其他筆留著', () => {
+  const { songs, skipped } = parseSharedDictionary({
+    version: SUPPORTED_VERSION,
+    entries: [],
+    songs: [
+      {
+        title: 'x',
+        entries: [
+          { surface: '失', reading: 'abc' }, // 不是假名
+          { surface: '癖', reading: 'くせ' },
+        ],
+      },
+    ],
+  });
+  assert.deepEqual(songs['x'], [{ surface: '癖', reading: 'くせ' }]);
+  assert.equal(skipped, 1);
+});
+
+test('沒有曲名的那組整組不要', () => {
+  const { songs } = parseSharedDictionary({
+    version: SUPPORTED_VERSION,
+    entries: [],
+    songs: [{ entries: [{ surface: '失', reading: 'な' }] }],
+  });
+  assert.deepEqual(songs, {});
+});
+
+test('songs 壞成不是陣列時只丟掉這一欄,通用條目要留著', () => {
+  // 「寧可整份丟掉」的原則有例外:通用條目本身沒問題就不該連坐
+  const { entries, songs } = parseSharedDictionary({
+    version: SUPPORTED_VERSION,
+    entries: [{ surface: '響めき', reading: 'どよめき' }],
+    songs: 'oops',
+  });
+  assert.equal(entries.length, 1);
+  assert.deepEqual(songs, {});
+});
+
+test('同一首歌重複出現時把條目併起來,不是後蓋前', () => {
+  const { songs } = parseSharedDictionary({
+    version: SUPPORTED_VERSION,
+    entries: [],
+    songs: [
+      { title: 'x', entries: [{ surface: '失', reading: 'な' }] },
+      { title: 'X', entries: [{ surface: '癖', reading: 'くせ' }] },
+    ],
+  });
+  assert.equal(songs['x'].length, 2);
 });

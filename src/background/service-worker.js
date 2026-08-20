@@ -252,7 +252,8 @@ const DICTIONARY_URL =
   'https://raw.githubusercontent.com/psgo555/romaji-lyrics-extension/master/dictionary.json';
 const DICTIONARY_KEY = 'sharedDictionary';
 const DICTIONARY_TTL_MS = 12 * 60 * 60 * 1000; // 12 小時
-const DICTIONARY_CACHE_VERSION = 1;
+// 2:多了限定單曲的條目(songs)。舊快取沒有那一欄,換號碼強迫重抓一次。
+const DICTIONARY_CACHE_VERSION = 2;
 
 /*
  * 安裝、更新、或(開發時)按下「重新載入擴充功能」都會把快取丟掉,
@@ -282,17 +283,17 @@ async function fetchSharedDictionary() {
     cached?.v === DICTIONARY_CACHE_VERSION &&
     Date.now() - cached.savedAt < DICTIONARY_TTL_MS
   ) {
-    return { entries: cached.entries ?? [], cached: true };
+    return fromCache(cached);
   }
 
   try {
     const res = await fetch(DICTIONARY_URL, { cache: 'no-cache' });
     if (!res.ok) {
       console.warn(`${LOG} 共用字典下載失敗,狀態碼 ${res.status}`);
-      return { entries: cached?.entries ?? [], cached: true }; // 過期的也比沒有好
+      return fromCache(cached); // 過期的也比沒有好
     }
 
-    const { entries, skipped } = parseSharedDictionary(await res.json());
+    const { entries, songs, skipped } = parseSharedDictionary(await res.json());
     if (skipped) {
       console.warn(`${LOG} 共用字典有 ${skipped} 筆沒通過驗證,已略過`);
     }
@@ -303,20 +304,32 @@ async function fetchSharedDictionary() {
      * 那代表檔案壞了或格式換了。這時把空的存進去,等於把使用者原本
      * 還能用的那份也一起清掉 —— 一個人手滑改壞檔案,所有人的字典就空了。
      */
-    if (!entries.length) {
+    const songCount = Object.keys(songs).length;
+    if (!entries.length && !songCount) {
       console.warn(`${LOG} 共用字典驗完是空的,沿用先前的`);
-      return { entries: cached?.entries ?? [], cached: true };
+      return fromCache(cached);
     }
 
     await chrome.storage.local.set({
-      [DICTIONARY_KEY]: { v: DICTIONARY_CACHE_VERSION, entries, savedAt: Date.now() },
+      [DICTIONARY_KEY]: { v: DICTIONARY_CACHE_VERSION, entries, songs, savedAt: Date.now() },
     });
-    console.info(`${LOG} 共用字典已更新,${entries.length} 筆`);
-    return { entries, cached: false };
+    console.info(`${LOG} 共用字典已更新,${entries.length} 筆通用 + ${songCount} 首歌的專屬條目`);
+    return { entries, songs, cached: false };
   } catch (err) {
     console.warn(`${LOG} 取得共用字典失敗,沿用先前的:`, err);
-    return { entries: cached?.entries ?? [], cached: true };
+    return fromCache(cached);
   }
+}
+
+/**
+ * 把快取整理成回應的形狀。
+ *
+ * 抽出來是因為「抓不到就沿用舊的」在上面出現四次,而每一處都要記得
+ * 同時帶上 entries 與 songs —— 漏一個的症狀是限定單曲的修正在
+ * 「這次沒連上網」的時候悄悄失效,不會有任何錯誤訊息。
+ */
+function fromCache(cached) {
+  return { entries: cached?.entries ?? [], songs: cached?.songs ?? {}, cached: true };
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -325,7 +338,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       .then(sendResponse)
       .catch((err) => {
         console.warn(`${LOG} 處理 FETCH_DICTIONARY 失敗:`, err);
-        sendResponse({ entries: [], cached: false });
+        sendResponse({ entries: [], songs: {}, cached: false });
       });
     return true;
   }
