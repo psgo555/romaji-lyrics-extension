@@ -137,6 +137,49 @@ body {
 
 /* .mode-hint 拿掉了 —— label 本身已經講清楚,底下再補一行說明是廢話 */
 
+/* ---- 拼音外觀 ---- */
+
+.appearance {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+/* 把瀏覽器預設的色盤外框拿掉,只留一個乾淨的色塊 */
+#color {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+#color::-webkit-color-swatch-wrapper { padding: 2px; }
+#color::-webkit-color-swatch { border: none; border-radius: 6px; }
+
+.swatches {
+  display: flex;
+  gap: 6px;
+}
+
+.swatch {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+/* 選中的加一圈外框 —— 色塊本身就是顏色,不能靠變色來表示選中 */
+.swatch[aria-pressed="true"] {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+}
+
 /* ---- 提前量滑桿 ---- */
 
 /* 數值就放在標籤旁邊,拖的時候不必移開視線去別處找 */

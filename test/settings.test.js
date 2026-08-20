@@ -25,6 +25,10 @@ import {
   SYNC_OFFSET_MAX,
   SWEEP_MS_MIN,
   SWEEP_MS_MAX,
+  normalizeColor,
+  normalizeScale,
+  ROMAJI_SCALE_MIN,
+  ROMAJI_SCALE_MAX,
 } from '../src/shared/settings.js';
 
 test('認得的模式原樣返回', () => {
@@ -149,4 +153,37 @@ test('預設值本身要是合法的', () => {
   assert.equal(normalizeMode(DEFAULTS.displayMode), DEFAULTS.displayMode);
   assert.equal(normalizeOffset(DEFAULTS.syncOffsetMs), DEFAULTS.syncOffsetMs);
   assert.equal(normalizeSweepMs(DEFAULTS.sweepMsPerLetter), DEFAULTS.sweepMsPerLetter);
+});
+
+/* ------------------------------------------------- 拼音外觀 */
+
+test('顏色只接受六位十六進位色碼', () => {
+  assert.equal(normalizeColor('#ff6b9d'), '#ff6b9d');
+  assert.equal(normalizeColor('#FF6B9D'), '#ff6b9d'); // 大小寫統一
+});
+
+test('顏色:認不得的一律退回預設', () => {
+  /*
+   * 這道檢查不是形式上的 —— 這個值會被寫進頁面的 CSS 變數,
+   * 而設定是跨裝置同步的。放行任意字串等於讓外部資料影響頁面樣式。
+   */
+  for (const bad of ['red', '#fff', '#12345', 'rgb(1,2,3)', 'red; content:x', '', null, 123]) {
+    assert.equal(
+      normalizeColor(bad),
+      DEFAULTS.romajiColor,
+      `${JSON.stringify(bad)} 應該被擋下`
+    );
+  }
+});
+
+test('大小夾在合理範圍內', () => {
+  assert.equal(normalizeScale(9999), ROMAJI_SCALE_MAX);
+  assert.equal(normalizeScale(0), ROMAJI_SCALE_MIN);
+  assert.equal(normalizeScale(80), 80);
+  assert.equal(normalizeScale('abc'), DEFAULTS.romajiScale);
+});
+
+test('外觀的預設值本身要合法', () => {
+  assert.equal(normalizeColor(DEFAULTS.romajiColor), DEFAULTS.romajiColor);
+  assert.equal(normalizeScale(DEFAULTS.romajiScale), DEFAULTS.romajiScale);
 });
