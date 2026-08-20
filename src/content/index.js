@@ -18,8 +18,7 @@ import {
   handleOutsideClick,
 } from './correction-popover.js';
 import { syncToggleButton, renderToggleButton } from './toggle-button.js';
-import { markActive, findActiveIndex, activeStrategy } from './active-line.js';
-import { chooseActive, anchoredPosition } from './line-anchor.js';
+import { markActive } from './active-line.js';
 import { centerActiveLine, resetAutoScroll } from './auto-scroll.js';
 import { startClock, stopClock, getPositionMs, getDurationMs } from './playback-clock.js';
 import { parseLrc } from './lrc.js';
@@ -797,19 +796,12 @@ let lrcAskedFor = null;
 /** 這首歌的 LRC 原始內容(還沒對齊之前先放著) */
 let pendingLrc = null;
 
-/** 上一次真的從畫面上觀察到的高亮(見 line-anchor.js 的 chooseActive) */
-let observedActive = { index: -1, at: 0 };
-/** 目前對錶到的是哪一行、什麼時候對的 */
-let anchorIndex = -1;
-let anchorAt = 0;
 
 function resetLrcState() {
   lineTimes = null;
   lineCurves = [];
   alignedCount = 0;
   pendingLrc = null;
-  observedActive = { index: -1, at: 0 };
-  anchorIndex = -1;
   // 換歌時歌詞容器會被換掉,自動置中記著的舊容器與舊行都要一併丟掉
   resetAutoScroll();
 }
@@ -967,27 +959,19 @@ function updateActiveLine() {
   }
 
   /*
-   * 換句聽 Spotify 的,句內進度用 LRC 的 —— 理由見 line-anchor.js。
+   * 時間軸是唯一的真相來源,不去看 Spotify 自己那個高亮。
    *
-   * 簡單說:畫面上同時有兩個高亮,而它們看的是不同的時鐘。
-   * LRCLIB 的絕對時間跟 Spotify 差個一兩秒是常態,結果就是拼音已經
-   * 掃到下一句、那句日文卻要再過兩秒才變白並跳動一下。
-   * 每次換句重新對錶,那個時間差就不會被使用者看見。
+   * 曾經試過反過來:換句的時機聽 Spotify 的,理由是「它的時鐘跟音訊
+   * 一定同步」。實測是錯的 —— 它畫面上的高亮比歌聲慢好幾秒,跟著它走
+   * 之後拼音整個變成慢半拍。它的高亮遲到這件事,反過來說明了先前
+   * 「拼音掃過去了、日文才慢慢變白」根本不是拼音太早,是它太晚。
+   *
+   * 所以解法不是改時間來源,而是不要讓那個遲到的高亮被看見 ——
+   * 見 overlay.css 裡 data-romaji-synced 那一段。
    */
-  const now = performance.now();
-  const observed = findActiveIndex(lines);
-  // 退路那一份刻意不加提前量:提前量只在下面的 anchoredPosition 加一次。
-  // 兩個地方都加的話,句子會提早換、掃描又再往前跑一截,等於算了兩遍。
-  const active = chooseActive(observed, activeIndexAt(lineTimes, raw), observedActive, now);
+  const position = raw + settings.syncOffsetMs;
 
-  if (active !== anchorIndex) {
-    anchorIndex = active;
-    anchorAt = now;
-  }
-
-  const position =
-    anchoredPosition(lineTimes[active] ?? null, now - anchorAt, settings.syncOffsetMs) ??
-    raw + settings.syncOffsetMs;
+  const active = activeIndexAt(lineTimes, position);
 
   /*
    * 逐字掃描的兩條路。
@@ -1034,13 +1018,14 @@ function updateActiveLine() {
   });
 
   /*
-   * 捲動由 Spotify 主導,我們只在它久久沒把這一句帶回中間時才補一下。
+   * Spotify 的捲動跟它的高亮一樣是遲到的,所以換句之後它常常還沒把
+   * 這一句帶回畫面中間。等它一下,還是沒到位就自己補捲。
    *
-   * 但「誰最靠近畫面中間」本身就是判斷高亮的最後一招 —— 那個策略當家時
-   * 自動置中會變成自問自答:我們把某一行捲到中間,下一次判斷就因為它在
-   * 中間而認定它正在被唱。所以那時候完全不插手。
+   * **只有走時間軸這條路才做。** 另一條路(上面的 markActive 退路)是靠
+   * 觀察畫面判斷正在唱哪一行的,而其中一個策略就是「誰最靠近畫面中間」——
+   * 在那條路上自動置中會變成自問自答。有獨立的時間來源時才有資格插手捲動。
    */
-  if (active >= 0 && activeStrategy() !== 'geometry') centerActiveLine(lines[active]);
+  if (active >= 0) centerActiveLine(lines[active]);
 }
 
 /**
