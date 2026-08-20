@@ -19,6 +19,7 @@ import {
 } from './correction-popover.js';
 import { syncToggleButton, renderToggleButton } from './toggle-button.js';
 import { markActive } from './active-line.js';
+import { centerActiveLine, resetAutoScroll } from './auto-scroll.js';
 import { startClock, stopClock, getPositionMs, getDurationMs } from './playback-clock.js';
 import { parseLrc } from './lrc.js';
 import {
@@ -800,6 +801,8 @@ function resetLrcState() {
   lineCurves = [];
   alignedCount = 0;
   pendingLrc = null;
+  // 換歌時歌詞容器會被換掉,自動置中記著的舊容器與舊行都要一併丟掉
+  resetAutoScroll();
 }
 
 /** 這一句唱到什麼時候結束(下一句開始)。最後一句沒有下一句就給個合理的長度。 */
@@ -1000,6 +1003,16 @@ function updateActiveLine() {
       paintSweep(el, null);
     }
   });
+
+  /*
+   * 換句時自己把它捲到畫面中間,不等 Spotify。
+   *
+   * **只有走時間軸這條路才做。** 另一條路(下面的 markActive 退路)是靠
+   * 觀察畫面判斷正在唱哪一行的,而其中一個策略就是「誰最靠近畫面中間」——
+   * 在那條路上自動置中會變成自問自答:我們把某一行捲到中間,下一次判斷
+   * 就因為它在中間而認定它正在被唱。有獨立的時間來源時才有資格插手捲動。
+   */
+  if (active >= 0) centerActiveLine(lines[active]);
 }
 
 /**
@@ -1227,6 +1240,7 @@ function shutdown() {
   observer?.disconnect();
   observer = null;
   stopClock();
+  resetAutoScroll();
   closeCorrectionPopover();
   // 面板留在畫面上但已經沒有東西在更新它了,那比沒有面板更誤導
   closeLrcPanel();
