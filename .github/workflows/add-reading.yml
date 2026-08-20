@@ -49,6 +49,12 @@ jobs:
           SCOPE: ${{ contains(github.event.issue.labels.*.name, 'global') && 'global' || 'song' }}
         run: node tools/apply-reading.mjs
 
+      # 測試裡有幾支會拉到 wanakana(reading.js),沒裝套件跑不起來。
+      # 放在寫檔之後:這一步比較慢,不值得為了「這筆根本不該收」的情況先等它。
+      - name: 裝套件
+        if: steps.apply.outputs.ok == 'true'
+        run: npm ci
+
       - name: 確認字典仍然是好的
         if: steps.apply.outputs.ok == 'true'
         # 驗證器在上一步已經跑過這一筆了,這裡多跑一次整套測試 ——
