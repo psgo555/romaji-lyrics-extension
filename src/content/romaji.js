@@ -14,6 +14,7 @@ import KuromojiAnalyzer from 'kuroshiro-analyzer-kuromoji';
 import { applyCorrections } from './corrections.js';
 import { loadUserCorrections, previewCorrections } from './corrections-store.js';
 import { hasJapanese, stripIterationMarks } from './cjk.js';
+import { digitsToKanji } from './numbers.js';
 import { stripMacrons, stripProlongMarks } from './macron.js';
 
 const LOG = '[romaji]';
@@ -114,7 +115,9 @@ async function convert(kind, text) {
     // 先把已知會被 kuromoji 讀錯的詞換成正確的平假名讀音,再送去斷詞。
     // kuroshiro 不會重新判斷平假名的讀音,所以取代過的部分保證轉對。
     // 詳見 corrections.js。
-    const corrected = applyCorrections(text);
+    // 阿拉伯數字換成漢字數字,量詞的不規則讀法才吃得到辭典(見 numbers.js)。
+    // 順序要在修正之後:修正是拿原文比對的,先換數字會讓含數字的條目對不上。
+    const corrected = digitsToKanji(applyCorrections(text));
     const converted = await kuroshiro.convert(corrected, {
       to: kind === 'kana' ? 'hiragana' : 'romaji',
       mode: 'spaced',
@@ -169,7 +172,8 @@ export async function previewRomaji(text, candidate) {
   if (initError) return null;
 
   try {
-    const corrected = previewCorrections(text, candidate);
+    // 跟 convert() 走完全一樣的前處理,預覽才會等於實際結果
+    const corrected = digitsToKanji(previewCorrections(text, candidate));
     const romaji = await kuroshiro.convert(corrected, { to: 'romaji', mode: 'spaced' });
     // 要跟 convert() 的出口做完全一樣的處理 —— 預覽跟實際結果長得不一樣的話,
     // 使用者是照著預覽決定要不要存的,那等於騙他
