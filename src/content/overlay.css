@@ -675,6 +675,15 @@ html[data-romaji-mode='off'] .romaji-overlay {
   overflow: hidden;
 }
 
+/*
+ * 標題列是拖曳的把手。
+ *
+ * cursor 是唯一會告訴使用者「這裡可以拖」的線索 —— 沒有它這個功能
+ * 等於不存在,因為沒有人會隨手去拖一個標題列試試看。
+ *
+ * user-select 要關掉:拖的時候瀏覽器會順手把曲名反白,看起來像誤觸,
+ * 而且放開之後那片反白還會留著。
+ */
 .romaji-lrc-head {
   display: flex;
   align-items: flex-start;
@@ -682,6 +691,13 @@ html[data-romaji-mode='off'] .romaji-overlay {
   gap: 8px;
   padding: 12px 14px;
   border-bottom: 1px solid #2f2f2f;
+  cursor: move;
+  user-select: none;
+}
+
+/* 叉叉是按的不是拖的,游標要講實話 */
+.romaji-lrc-close {
+  cursor: pointer;
 }
 
 .romaji-lrc-titles {

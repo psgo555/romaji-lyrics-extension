@@ -30,6 +30,7 @@ import {
   buildWordCurve,
   paintSweep,
 } from './sync-highlight.js';
+import { clampToViewport } from './drag-bounds.js';
 
 const LOG = '[romaji]';
 
@@ -56,6 +57,113 @@ let curves = [];
 let lastActive = -1;
 let userScrolledAt = 0;
 let onCloseCallback = null;
+
+/* -------------------------------------------------------------- 拖曳 */
+
+/*
+ * 為什麼要能拖:面板固定在右上角,而 Chrome 的擴充功能設定視窗**一定**
+ * 也在右上角(那是瀏覽器決定的,改不了)。兩個一定會疊在一起,
+ * 使用者一開設定就看不到歌詞。
+ *
+ * 為什麼不是「自動放到 Spotify 中間那塊」:那要靠猜它的版面結構,
+ * 而這個擴充功能已經被 Spotify 改版打壞過一次。讓使用者自己放,
+ * 不依賴任何選擇器,它改版幾次都不會壞。
+ */
+
+const POSITION_KEY = 'lrcPanelPos';
+
+let dragging = null;
+
+function enableDrag(panel, handle, closeButton) {
+  handle.addEventListener('mousedown', (event) => {
+    if (event.button !== 0 || closeButton.contains(event.target)) return;
+    event.preventDefault(); // 不要讓瀏覽器把標題文字選起來
+
+    const rect = panel.getBoundingClientRect();
+    /*
+     * 面板原本是靠 top/right/bottom 撐出高度的。改用 left/top 定位之前,
+     * 必須先把高度固定下來 —— 否則 bottom 一放掉,面板會縮成標題列那麼高。
+     */
+    panel.style.height = `${rect.height}px`;
+    panel.style.right = 'auto';
+    panel.style.bottom = 'auto';
+    panel.style.left = `${rect.left}px`;
+    panel.style.top = `${rect.top}px`;
+
+    dragging = { panel, offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top };
+  });
+}
+
+function onDragMove(event) {
+  if (!dragging) return;
+  const { panel, offsetX, offsetY } = dragging;
+  const rect = panel.getBoundingClientRect();
+
+  const next = clampToViewport(
+    { left: event.clientX - offsetX, top: event.clientY - offsetY },
+    { width: rect.width, height: rect.height },
+    { width: window.innerWidth, height: window.innerHeight }
+  );
+
+  panel.style.left = `${next.left}px`;
+  panel.style.top = `${next.top}px`;
+}
+
+function onDragEnd() {
+  if (!dragging) return;
+  const rect = dragging.panel.getBoundingClientRect();
+  dragging = null;
+
+  // 記住位置。存不進去也沒關係,下次回到預設位置而已,不值得打擾使用者
+  chrome.storage.local
+    .set({ [POSITION_KEY]: { left: rect.left, top: rect.top, height: rect.height } })
+    .catch(() => {});
+}
+
+/*
+ * 掛在 document 上而不是面板上:放開滑鼠的時候游標常常已經離開面板了
+ * (拖得比較快的時候),掛在面板上會收不到那一下,面板就黏在游標上。
+ */
+document.addEventListener('mousemove', onDragMove);
+document.addEventListener('mouseup', onDragEnd);
+
+/** 視窗變小時,把面板拉回看得到的地方 */
+window.addEventListener('resize', () => {
+  if (!panelEl || panelEl.style.left === '') return;
+  const rect = panelEl.getBoundingClientRect();
+  const next = clampToViewport(
+    { left: rect.left, top: rect.top },
+    { width: rect.width, height: rect.height },
+    { width: window.innerWidth, height: window.innerHeight }
+  );
+  panelEl.style.left = `${next.left}px`;
+  panelEl.style.top = `${next.top}px`;
+});
+
+/** 還原上次拖到的位置。沒存過就維持 CSS 的預設位置。 */
+async function restorePosition(panel) {
+  try {
+    const stored = await chrome.storage.local.get(POSITION_KEY);
+    const saved = stored[POSITION_KEY];
+    if (!saved || !Number.isFinite(saved.left) || !Number.isFinite(saved.top)) return;
+
+    const height = Number.isFinite(saved.height) ? saved.height : panel.getBoundingClientRect().height;
+    // 存的時候畫面可能比現在大,所以還原時要再夾一次
+    const next = clampToViewport(
+      { left: saved.left, top: saved.top },
+      { width: panel.getBoundingClientRect().width, height },
+      { width: window.innerWidth, height: window.innerHeight }
+    );
+
+    panel.style.height = `${height}px`;
+    panel.style.right = 'auto';
+    panel.style.bottom = 'auto';
+    panel.style.left = `${next.left}px`;
+    panel.style.top = `${next.top}px`;
+  } catch {
+    // 讀不到就用預設位置,不是值得中斷的事
+  }
+}
 
 /* ------------------------------------------------------------ 建立面板 */
 
@@ -93,6 +201,7 @@ function buildShell(title, subtitle) {
   });
 
   head.append(titles, close);
+  enableDrag(panel, head, close);
 
   const body = document.createElement('ol');
   body.className = 'romaji-lrc-body';
@@ -169,6 +278,9 @@ export function openLrcPanel({ title, subtitle, timed, plain, onClose }) {
   userScrolledAt = 0;
 
   document.body.appendChild(panelEl);
+  // 位置是非同步讀回來的,所以面板會先出現在預設位置再跳過去 ——
+  // 那一下比「等讀完才顯示」好:歌詞晚出現才是使用者真的在意的事
+  restorePosition(panelEl);
 
   const withWords = curves.filter(Boolean).length;
   console.info(
