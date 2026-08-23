@@ -243,7 +243,14 @@ export function resizeTo(src, width, height) {
  * 補邊最安全 —— 底色跟畫面接近的話,看起來就像本來就是這個比例。
  */
 export function fitInto(src, width, height, bg) {
-  const scale = Math.min(width / src.width, height / src.height);
+  /*
+   * 只縮不放。
+   *
+   * 截圖放大一定會糊 —— 那些像素本來就不存在,再好的演算法也是猜的。
+   * 留白至少是誠實的:畫面小,但每個字都是清楚的。
+   * 商店的圖被人放大看的時候,糊掉比留白難看得多。
+   */
+  const scale = Math.min(width / src.width, height / src.height, 1);
   const w = Math.max(1, Math.round(src.width * scale));
   const h = Math.max(1, Math.round(src.height * scale));
   const scaled = resizeTo(src, w, h);
