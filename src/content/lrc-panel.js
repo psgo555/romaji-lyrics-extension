@@ -111,13 +111,35 @@ function onDragMove(event) {
 
 function onDragEnd() {
   if (!dragging) return;
-  const rect = dragging.panel.getBoundingClientRect();
   dragging = null;
+  saveLayout();
+}
 
-  // 記住位置。存不進去也沒關係,下次回到預設位置而已,不值得打擾使用者
-  chrome.storage.local
-    .set({ [POSITION_KEY]: { left: rect.left, top: rect.top, height: rect.height } })
-    .catch(() => {});
+/**
+ * 記住位置與大小。
+ *
+ * 存不進去也沒關係 —— 下次回到預設位置而已,不值得打擾使用者。
+ */
+let saveTimer = null;
+function saveLayout() {
+  if (!panelEl) return;
+  const rect = panelEl.getBoundingClientRect();
+  const layout = {
+    left: rect.left,
+    top: rect.top,
+    width: rect.width,
+    height: rect.height,
+  };
+
+  /*
+   * 節流。拉伸的時候 ResizeObserver 每一幀都會叫一次,
+   * 一次拖曳就是上百次寫入 —— storage 有寫入頻率上限,
+   * 灌爆之後**其他功能的儲存也會一起失敗**(自訂讀音就是這樣壞過一次)。
+   */
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    chrome.storage.local.set({ [POSITION_KEY]: layout }).catch(() => {});
+  }, 400);
 }
 
 /*
@@ -140,21 +162,42 @@ window.addEventListener('resize', () => {
   panelEl.style.top = `${next.top}px`;
 });
 
-/** 還原上次拖到的位置。沒存過就維持 CSS 的預設位置。 */
+/**
+ * 盯著面板被拉大縮小。
+ *
+ * 用 ResizeObserver 而不是聽某個事件:右下角的拉伸把手是瀏覽器內建的,
+ * 它不會發出任何我們攔得到的事件 —— 只看得到「大小變了」這個結果。
+ */
+let sizeObserver = null;
+function watchResize(panel) {
+  sizeObserver?.disconnect();
+  sizeObserver = new ResizeObserver(() => {
+    // 拖曳中不要存:那時候位置每一幀都在變,等放開再存一次就好
+    if (!dragging) saveLayout();
+  });
+  sizeObserver.observe(panel);
+}
+
+/** 還原上次拖到的位置與大小。沒存過就維持 CSS 的預設值。 */
 async function restorePosition(panel) {
   try {
     const stored = await chrome.storage.local.get(POSITION_KEY);
     const saved = stored[POSITION_KEY];
     if (!saved || !Number.isFinite(saved.left) || !Number.isFinite(saved.top)) return;
 
-    const height = Number.isFinite(saved.height) ? saved.height : panel.getBoundingClientRect().height;
+    const rect = panel.getBoundingClientRect();
+    // 舊版的紀錄沒有 width,少了就沿用目前的,不要整筆丟掉
+    const width = Number.isFinite(saved.width) ? saved.width : rect.width;
+    const height = Number.isFinite(saved.height) ? saved.height : rect.height;
+
     // 存的時候畫面可能比現在大,所以還原時要再夾一次
     const next = clampToViewport(
       { left: saved.left, top: saved.top },
-      { width: panel.getBoundingClientRect().width, height },
+      { width, height },
       { width: window.innerWidth, height: window.innerHeight }
     );
 
+    panel.style.width = `${width}px`;
     panel.style.height = `${height}px`;
     panel.style.right = 'auto';
     panel.style.bottom = 'auto';
@@ -281,6 +324,7 @@ export function openLrcPanel({ title, subtitle, timed, plain, onClose }) {
   // 位置是非同步讀回來的,所以面板會先出現在預設位置再跳過去 ——
   // 那一下比「等讀完才顯示」好:歌詞晚出現才是使用者真的在意的事
   restorePosition(panelEl);
+  watchResize(panelEl);
 
   const withWords = curves.filter(Boolean).length;
   console.info(
@@ -294,6 +338,11 @@ export function openLrcPanel({ title, subtitle, timed, plain, onClose }) {
 }
 
 export function closeLrcPanel() {
+  // 面板都要移除了,還盯著它看只是留一個沒人管的觀察者
+  sizeObserver?.disconnect();
+  sizeObserver = null;
+  clearTimeout(saveTimer);
+
   panelEl?.remove();
   panelEl = null;
   bodyEl = null;

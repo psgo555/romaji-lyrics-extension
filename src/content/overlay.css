@@ -664,6 +664,20 @@ html[data-romaji-mode='off'] .romaji-overlay {
   flex-direction: column;
   width: 360px;
   max-width: calc(100vw - 32px);
+  /*
+   * 右下角可以拉大縮小。
+   *
+   * 用瀏覽器內建的 resize 而不是自己畫一個把手:內建的行為(游標、
+   * 拖曳、雙擊還原)使用者已經在別的地方學會了,自己做只會做出一個
+   * 長得像、但細節不一樣的東西。
+   *
+   * min 是為了不要被拉到看不見 —— 拉成 0 之後那個把手也跟著消失,
+   * 就再也拉不回來了。max 是為了不要超出畫面。
+   */
+  resize: both;
+  min-width: 260px;
+  min-height: 180px;
+  max-height: calc(100vh - 32px);
   background: rgba(24, 24, 24, 0.96);
   border: 1px solid #3a3a3a;
   border-radius: 12px;
