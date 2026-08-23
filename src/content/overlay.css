@@ -678,6 +678,11 @@ html[data-romaji-mode='off'] .romaji-overlay {
   min-width: 260px;
   min-height: 180px;
   max-height: calc(100vh - 32px);
+  /*
+   * 讓底下的歌詞字級可以跟著面板寬度走(見 .romaji-lrc-body)。
+   * 把面板拉大的目的就是想把字看清楚,只是多顯示幾行沒有解決問題。
+   */
+  container-type: inline-size;
   background: rgba(24, 24, 24, 0.96);
   border: 1px solid #3a3a3a;
   border-radius: 12px;
@@ -765,6 +770,16 @@ html[data-romaji-mode='off'] .romaji-overlay {
   flex: 1;
   margin: 0;
   padding: 12px 14px 40% 14px; /* 底部留白讓最後幾句也能捲到中間 */
+  /*
+   * 字級跟著面板寬度走。
+   *
+   * 3.6cqw 的意思是「面板寬度的 3.6%」—— 在預設的 360px 寬時剛好是 13px,
+   * 也就是**跟改動前一模一樣**,沒有拉過的人不會發現任何差別。
+   *
+   * 上下限是必要的:沒有下限,面板拉窄時字會小到讀不了(而拉窄的人
+   * 是想省空間,不是想看不見);沒有上限,拉到全螢幕會變成一行一個字。
+   */
+  font-size: clamp(13px, 3.6cqw, 26px);
   list-style: none;
   overflow-y: auto;
   overscroll-behavior: contain; /* 捲到底時不要把整個 Spotify 頁面帶著捲 */
