@@ -1,41 +1,38 @@
 /**
  * sync-highlight.js
- * 把 LRC 的時間軸對到畫面上的歌詞行,並做出「唱到哪、亮到哪」的效果。
+ * 將 LRC 時間軸對應至畫面上的歌詞行,並產生逐字掃描的高亮效果。
  *
- * 為什麼不直接看 Spotify 的畫面:
- * 觀察畫面只能在 Spotify 更新完之後才知道換行了,先天就慢半拍,
- * 而且只知道「現在是第幾句」,拿不到句子內部的進度 ——
- * 逐字掃過去的效果需要後者。
+ * 不採觀察 Spotify 畫面的作法:該方式須待 Spotify 更新完成後才能得知換行,
+ * 先天落後,且僅能取得目前句次,無法取得句子內部的進度 —— 逐字掃描需要後者。
  *
- * 改成用「播放到第幾毫秒」配上「每一句從第幾毫秒開始」來算,
- * 延遲趨近於零,而且句內進度是連續的。
+ * 改以「播放位置(毫秒)」搭配「每句的起始毫秒」計算,延遲趨近於零,
+ * 且句內進度為連續值。
  */
 
 /**
  * 比對用的正規化。
  *
- * LRCLIB 的歌詞跟 Spotify 顯示的常有細微差異(空白、全形半形、標點),
- * 逐字元比對幾乎一定對不上,所以只留下有辨識度的部分。
+ * LRCLIB 的歌詞與 Spotify 顯示的內容常有細微差異(空白、全形半形、標點),
+ * 逐字元比對幾乎必然失敗,因而僅保留具辨識度的部分。
  */
 function normalize(text) {
   return (text ?? '')
     .normalize('NFKC') // 全形英數 → 半形,相容字 → 標準字
     .replace(/\s+/g, '')
-    .replace(/[!-/:-@[-`{-~、-〟｡-･]/g, '') // 標點一律拿掉
+    .replace(/[!-/:-@[-`{-~、-〟｡-･]/g, '') // 一律移除標點
     .toLowerCase();
 }
 
 /**
- * 把 LRC 的每一句對到畫面上的每一行。
+ * 將 LRC 的每一句對應至畫面上的每一行。
  *
- * 用「照順序貪婪比對」而不是建一張 文字→時間 的表:
- * 副歌會重複出現一模一樣的句子,查表會全部對到第一次出現的時間。
- * 照順序走就不會有這個問題。
+ * 採依序貪婪比對,而非建立「文字 → 時間」的對照表:副歌會重複出現完全相同的
+ * 句子,查表會將其全部對應至首次出現的時間。依序推進即無此問題。
  *
  * @param {Array<{timeMs:number,text:string,words?:Array}>} lrcLines
  * @param {string[]} domTexts 畫面上每一行的原文
  * @returns {{ times: Array<number|null>, words: Array<Array|null>, matchRate: number }}
- *          times/words 都跟 domTexts 等長;matchRate 是有對到的比例
+ *          times 與 words 皆與 domTexts 等長;matchRate 為成功對應的比例
  */
 export function alignLrc(lrcLines, domTexts) {
   const times = new Array(domTexts.length).fill(null);
@@ -53,8 +50,8 @@ export function alignLrc(lrcLines, domTexts) {
     if (!target) continue; // 間奏空行不列入計算
     comparable += 1;
 
-    // 只往前找有限範圍 —— Spotify 與 LRCLIB 的分行方式可能略有出入,
-    // 給一點餘裕,但不能無限找,否則錯配會愈跑愈遠
+    // 僅向前搜尋有限範圍:Spotify 與 LRCLIB 的分行方式可能略有出入,須保留餘裕,
+    // 但不可無限搜尋,否則錯誤配對會持續擴大
     const limit = Math.min(lrcLines.length, cursor + 12);
     for (let k = cursor; k < limit; k += 1) {
       if (lrcNorm[k] !== target) continue;
@@ -70,12 +67,12 @@ export function alignLrc(lrcLines, domTexts) {
 }
 
 /**
- * 沒對到時間的行(通常是 LRC 少一句)用前後鄰居內插補起來,
- * 否則那一行永遠不會亮。
+ * 以前後鄰居內插補齊未對應到時間的行(通常為 LRC 缺少一句),
+ * 否則該行永遠不會高亮。
  *
- * 最後還會強制整個序列遞增。這一步不是可有可無的:
- * 對齊有誤差時可能產生前後顛倒的時間,而 activeIndexAt 是假設遞增在做判斷的
- * (遇到大於目前位置的就停),順序一亂就會提早停下來、**略過中間那幾句**。
+ * 最後強制整個序列遞增。此步驟不可省略:對齊誤差可能產生前後顛倒的時間,
+ * 而 activeIndexAt 是以遞增為前提進行判斷(遇到大於目前位置者即停止),
+ * 順序一旦錯亂便會提前停止,略過中間數句。
  */
 export function fillGaps(times) {
   const filled = [...times];
@@ -88,13 +85,13 @@ export function fillGaps(times) {
     let next = i + 1;
     while (next < filled.length && times[next] === null) next += 1;
 
-    if (prev < 0 || next >= filled.length) continue; // 頭尾補不了就算了
+    if (prev < 0 || next >= filled.length) continue; // 首尾無從補齊
 
     const span = times[next] - filled[prev];
     filled[i] = filled[prev] + (span * (i - prev)) / (next - prev);
   }
 
-  // 保證遞增:任何比前一句還早的時間都夾到前一句
+  // 保證遞增:早於前一句的時間一律夾至前一句
   let ceiling = -Infinity;
   for (let i = 0; i < filled.length; i += 1) {
     if (filled[i] === null) continue;
@@ -106,8 +103,8 @@ export function fillGaps(times) {
 }
 
 /**
- * 找出 positionMs 當下應該亮第幾行。
- * times 可能有 null(補不起來的行),要跳過。
+ * 取得 positionMs 當下應高亮的行。
+ * times 可能含 null(無法補齊的行),須略過。
  */
 export function activeIndexAt(times, positionMs) {
   let found = -1;
@@ -120,18 +117,17 @@ export function activeIndexAt(times, positionMs) {
 }
 
 /**
- * 這一行唱到幾成(0~1)。
+ * 該行的完成比例(0~1)。
  *
- * 掃描時間怎麼決定,兩個限制缺一不可:
+ * 掃描時間由兩項限制共同決定,缺一不可:
  *
- * 1. spanFactor —— **平常以實際句距為準**。唱歌句中會有換氣、小停頓,
- *    真正的演唱時間比「字數×每字時間」估出來的長,所以不能用字數當主要依據,
- *    否則同一句還沒唱完字就掃完了。乘上略小於 1 的係數,讓掃描剛好在
- *    下一句開始前收尾。
- * 2. maxSpanMs —— **但句尾接長間奏時要擋住**。一句唱 2 秒卻隔 8 秒才接下一句的話,
- *    照句距掃就會拖成 8 秒、唱完才掃到四分之一。這時改由字數估算封頂。
+ *   1. spanFactor —— 平常以實際句距為準。演唱時句中含換氣與停頓,實際演唱時間
+ *      長於「字數 × 每字時間」的估算值,因此不可以字數為主要依據,否則該句尚未
+ *      唱完掃描即已結束。乘上略小於 1 的係數,使掃描恰於下一句開始前收尾。
+ *   2. maxSpanMs —— 句尾接續長間奏時須設上限。一句演唱 2 秒卻相隔 8 秒才接下一句
+ *      時,依句距掃描會拖長至 8 秒,整句唱完僅掃描四分之一。此時改由字數估算封頂。
  *
- * 兩者取小:一般情況第 1 條生效(停頓被自然吸收),遇到長間奏才輪到第 2 條。
+ * 兩者取小:一般情況由第 1 項生效(停頓被自然吸收),遇長間奏才由第 2 項接手。
  *
  * @param {Array<number|null>} times
  * @param {number} index
@@ -155,11 +151,11 @@ export function progressAt(times, index, positionMs, options = {}) {
 }
 
 /**
- * 把逐字時間標籤變成一條「時間 → 進度」的折線。
+ * 將逐字時間標籤轉為一條「時間 → 進度」的折線。
  *
- * 進度用**原文字數的比例**當座標:LRC 的詞是日文,而畫面上的是羅馬拼音,
- * 兩者字數不同、也沒有一對一的對應關係。改用比例就不必去對每個字母
- * 屬於哪個詞 —— 只要每個詞在整句中佔的比例對,掃過去的位置就夠準了。
+ * 進度以原文字數的比例作為座標:LRC 的詞為日文,畫面上的則是羅馬拼音,兩者字數
+ * 不同,亦無一對一的對應關係。改用比例後即無須判定每個字母屬於哪個詞 ——
+ * 只要各詞於整句中所佔的比例正確,掃描位置即足夠準確。
  *
  * @param {Array<{timeMs:number,text:string}>} words
  * @returns {Array<{timeMs:number,frac:number}>|null} 資料不足時回 null
@@ -179,11 +175,11 @@ export function buildWordCurve(words) {
 }
 
 /**
- * 依折線算出目前進度(0~1)。兩個標籤之間用線性內插,所以掃描是連續的。
+ * 依折線計算目前進度(0~1)。兩個標籤之間採線性內插,掃描因而為連續。
  *
  * @param {Array<{timeMs:number,frac:number}>} curve
  * @param {number} positionMs
- * @param {number} endMs 這一句結束的時間(下一句開始),用來算最後一個詞
+ * @param {number} endMs 該句結束的時間(下一句開始),用於計算最後一個詞
  */
 export function progressFromCurve(curve, positionMs, endMs) {
   if (!curve?.length) return null;
@@ -197,7 +193,7 @@ export function progressFromCurve(curve, positionMs, endMs) {
     return curve[i].frac + ratio * (curve[i + 1].frac - curve[i].frac);
   }
 
-  // 最後一個詞唱到句尾
+  // 最後一個詞延續至句尾
   const last = curve[curve.length - 1];
   const span = endMs - last.timeMs;
   const ratio = span > 0 ? Math.min(1, (positionMs - last.timeMs) / span) : 1;
@@ -205,21 +201,20 @@ export function progressFromCurve(curve, positionMs, endMs) {
 }
 
 /**
- * 把「唱到哪」畫在拼音上。
+ * 將演唱進度繪製於拼音上。
  *
- * 直接在既有的逐字 <span> 上加 class,而不是另外蓋漸層遮罩 ——
- * 那些 span 本來就是手動切分功能建的,重用它們就不會跟
- * 點擊切分、hover 提示、鍵盤游標互相打架。
+ * 直接於既有的逐字 <span> 加上 class,而非另外覆蓋漸層遮罩 —— 那些 span 本即由
+ * 手動切分功能建立,重用可避免與點擊切分、hover 提示及鍵盤游標互相干擾。
  *
  * @param {HTMLElement} lineEl 歌詞行
- * @param {number|null} progress 0~1;傳 null 代表這行不是正在唱的,全部清掉
+ * @param {number|null} progress 0~1;傳入 null 表示該行非演唱中,清除全部標記
  */
 export function paintSweep(lineEl, progress) {
   const overlay = lineEl.querySelector(':scope > .romaji-overlay');
   if (!overlay) return;
 
-  // progress 是 null 代表這一行不做逐字掃描(沒有逐字時間軸,或不是正在唱的那行)。
-  // 拿掉標記讓 CSS 退回「整句一起亮」—— 沒有資料就不要假裝有。
+  // progress 為 null 表示該行不進行逐字掃描(無逐字時間軸,或非演唱中的行)。
+  // 移除標記使 CSS 退回整句一併高亮 —— 沒有資料即不應假裝具備。
   if (progress === null) {
     if (overlay.dataset.romajiSweep) delete overlay.dataset.romajiSweep;
     for (const span of overlay.querySelectorAll('.romaji-ch.is-sung')) {
@@ -235,11 +230,11 @@ export function paintSweep(lineEl, progress) {
 
   const sung = Math.round(progress * chars.length);
 
-  // 只在有變化時才動 DOM —— 這個函式每幾十毫秒就跑一次。
+  // 僅於狀態變動時操作 DOM —— 本函式每數十毫秒執行一次。
   //
-  // 比對的是**畫面上實際的狀態**而不是自己記的數字:重新轉換那一行時
-  // renderRomaji 會整批換掉這些 span,class 跟著沒了。
-  // 如果只信自己記的數字,就會誤判「沒變化」而不重畫,高亮就消失了。
+  // 比對的對象是畫面上的實際狀態而非自行記錄的數值:重新轉換該行時,
+  // renderRomaji 會整批替換這些 span,class 隨之消失。若僅信任自行記錄的數值,
+  // 便會誤判為無變動而不重繪,高亮因而消失。
   const painted = overlay.querySelectorAll('.romaji-ch.is-sung').length;
   if (painted === sung) return;
 
