@@ -27,7 +27,7 @@ yume naraba dorehodo yokatta deshou
 
 ### 手動斷字
 
-為過長的拼音插入空格,例如將 `sukitootta` 斷為 `suki tootta`。設定依歌詞行儲存,再次播放時自動套用。
+點擊拼音定位游標後按空白鍵,即可在該處插入或移除空格 —— 例如將 `sukitootta` 斷為 `suki tootta`。設定依歌詞行儲存,再次播放時自動套用。
 
 ### 自訂讀音
 
@@ -39,7 +39,7 @@ yume naraba dorehodo yokatta deshou
 
 ### 歌詞備援
 
-Spotify 未提供歌詞的曲目改由 [LRCLIB](https://lrclib.net) 取得,以浮動面板顯示。面板可拖曳與縮放,字級隨面板寬度調整。
+Spotify 未提供歌詞的曲目改由 [LRCLIB](https://lrclib.net) 取得,以浮動面板顯示。拖曳標題列可移動面板,右下角可調整大小,字級隨面板寬度變化。位置與大小會記住。
 
 ## 安裝
 
