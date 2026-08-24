@@ -2,19 +2,19 @@
  * playback-clock.js
  * 取得目前的播放進度(毫秒)。
  *
- * 為什麼需要:要讓歌詞高亮跟上歌聲,就得知道「現在播到第幾秒」。
- * 用觀察 Spotify 畫面的方式去推斷「現在唱到第幾句」先天就會慢半拍,
- * 而且完全拿不到句子內部的進度(逐字掃過去的效果需要那個)。
+ * 歌詞高亮需與歌聲同步,因此須知道當前的播放位置。以觀察 Spotify 畫面推斷句次的
+ * 作法先天落後,且無法取得句子內部的進度 —— 逐字高亮需要該項資料。
  *
- * ── 實測紀錄(2026-08,Spotify 網頁版)────────────────────────────
- * 1. 頁面上**沒有** <audio>/<video> 可以讀 currentTime(querySelectorAll 回空陣列)
- * 2. [data-testid="playback-progressbar"] **沒有** aria-valuenow,只有 class,
- *    也找不到任何 [role="slider"] 元素 —— 沒有現成的數值可讀
- * 3. [data-testid="playback-position"] 的文字是 "0:25" 這種格式,只有秒的精度
- * 4. 但文字**跳動的瞬間**很準:實測連續三次間隔都正好 1.00 秒
+ * 實測結果(2026-08,Spotify 網頁版):
  *
- * 所以策略是:用 MutationObserver 抓文字跳動的那一刻當基準點,
- * 中間用 performance.now() 內插。精度可以從 1 秒補到 100 毫秒以內。
+ *   1. 頁面上沒有 <audio> 或 <video> 可供讀取 currentTime(querySelectorAll 回空陣列)
+ *   2. [data-testid="playback-progressbar"] 沒有 aria-valuenow,亦無任何 [role="slider"]
+ *      元素,沒有現成的數值可讀
+ *   3. [data-testid="playback-position"] 的文字格式為 "0:25",僅有秒的精度
+ *   4. 但文字跳動的時點準確:實測連續三次的間隔皆為 1.00 秒
+ *
+ * 因此以 MutationObserver 捕捉文字跳動作為基準點,其間以 performance.now() 內插,
+ * 將精度自 1 秒提升至 100 毫秒以內。
  */
 
 const LOG = '[romaji]';
@@ -22,25 +22,25 @@ const LOG = '[romaji]';
 const POSITION_SELECTOR = '[data-testid="playback-position"]';
 const DURATION_SELECTOR = '[data-testid="playback-duration"]';
 
-/** 超過這麼久沒跳動就判定為暫停(正常是每秒跳一次) */
+/** 超過此時間未跳動即判定為暫停(正常為每秒一次) */
 const PAUSE_AFTER_MS = 1800;
-/** 內插最多補這麼多,避免暫停或卡頓時愈飄愈遠 */
+/** 內插的上限。暫停或卡頓時避免誤差持續累積。 */
 const MAX_INTERPOLATE_MS = 1100;
-/** 位置變動超過這麼多就當作使用者拖動了進度條,重新對齊 */
+/** 位置變動超過此值即視為使用者拖動進度條,重新對齊 */
 const SEEK_THRESHOLD_MS = 1500;
-/** 多久確認一次觀察目標還在(React 會抽換元素) */
+/** 確認觀察目標是否仍存在的間隔(React 會抽換元素) */
 const REATTACH_MS = 500;
 
 let observer = null;
 let watchedEl = null;
 let reattachTimer = null;
 
-let domMs = null; // 畫面上顯示的秒數換算成毫秒
-let stampedAt = 0; // 抓到那次跳動時的 performance.now()
-let sawEdge = false; // 有沒有抓到過真正的跳動(還沒抓到時精度只有 1 秒)
+let domMs = null; // 畫面顯示的秒數,換算為毫秒
+let stampedAt = 0; // 捕捉到該次跳動時的 performance.now()
+let sawEdge = false; // 是否已捕捉到跳動(捕捉前精度僅有 1 秒)
 
 /**
- * "0:25" / "4:03" / "1:02:03" → 毫秒。認不得就回 null。
+ * "0:25" / "4:03" / "1:02:03" → 毫秒。無法解析時回 null。
  */
 export function parseTime(text) {
   if (!text) return null;
@@ -54,24 +54,24 @@ export function parseTime(text) {
   return (h * 3600 + m * 60 + s) * 1000;
 }
 
-/** 把畫面上讀到的新秒數記下來,並蓋上時間戳 */
+/** 記錄畫面讀取到的新秒數,並標上時間戳 */
 function stamp(nextMs) {
   if (nextMs === null) return;
 
   const now = performance.now();
   const jumped = domMs !== null && Math.abs(nextMs - domMs) > SEEK_THRESHOLD_MS;
 
-  // 拖動進度條之後舊的內插基準完全沒有意義,直接丟掉重來
+  // 拖動進度條後,原有的內插基準已失效,捨棄並重新建立
   if (jumped) sawEdge = false;
-  // 第一次讀到不算「跳動」—— 我們只知道它顯示這個秒數,
-  // 不知道是這一秒的開頭還是結尾。要等真的看到它變才有準確的基準點。
+  // 首次讀取不計為跳動:僅得知當下顯示的秒數,無從判斷該值位於這一秒的起點或末端。
+  // 須待實際觀察到變動,才能取得準確的基準點。
   else if (domMs !== null && nextMs !== domMs) sawEdge = true;
 
   domMs = nextMs;
   stampedAt = now;
 }
 
-/** 確認 observer 掛在目前這顆元素上;React 換掉它時要重掛 */
+/** 確認 observer 掛載於當前元素;React 抽換元素時須重新掛載 */
 function ensureObserver() {
   const el = document.querySelector(POSITION_SELECTOR);
   if (el === watchedEl) return;
@@ -84,8 +84,8 @@ function ensureObserver() {
     return;
   }
 
-  // 秒數是直接改文字節點,所以 characterData 不能省;
-  // 但有些改版是整個換掉子節點,所以 childList 也要留著。
+  // 秒數以文字節點更新,characterData 不可省略;
+  // 部分改版改為整批替換子節點,childList 亦須保留。
   observer = new MutationObserver(() => stamp(parseTime(el.textContent)));
   observer.observe(el, { characterData: true, childList: true, subtree: true });
 
@@ -95,7 +95,7 @@ function ensureObserver() {
 /* ----------------------------------------------------------- 對外介面 */
 
 export function startClock() {
-  if (reattachTimer) return; // 已經在跑了
+  if (reattachTimer) return; // 已啟動
   ensureObserver();
   reattachTimer = setInterval(ensureObserver, REATTACH_MS);
   console.info(`${LOG} 播放時鐘啟動(來源:playback-position 文字 + 內插)`);
@@ -112,11 +112,10 @@ export function stopClock() {
 }
 
 /**
- * 目前播放位置(毫秒)。讀不到時回 null。
+ * 目前的播放位置(毫秒)。讀不到時回 null。
  *
- * 還沒抓到跳動邊緣時會加 500ms —— 畫面顯示 "0:25" 代表真實時間
- * 落在 25.000~26.000 之間,取中間值的誤差期望值最小。
- * 抓到邊緣之後就改用真正的內插,誤差可以壓到 100ms 以內。
+ * 尚未捕捉到跳動時加上 500ms:畫面顯示 "0:25" 表示實際時間落在 25.000 至 26.000
+ * 之間,取中間值的期望誤差最小。捕捉到跳動後改用內插,誤差可壓至 100ms 以內。
  */
 export function getPositionMs() {
   if (domMs === null) return null;
@@ -127,17 +126,17 @@ export function getPositionMs() {
 }
 
 /**
- * 現在是不是正在播放。
+ * 目前是否正在播放。
  *
- * 判斷方式是「秒數還有沒有在跳」,不去讀播放鈕的文字 ——
- * 那個是跟著介面語言變的,寫死任何字串都會在別的語言下壞掉。
+ * 依據為秒數是否持續跳動,而非播放鈕的文字 —— 該文字隨介面語言變動,
+ * 比對任何固定字串都會在其他語言下失效。
  */
 export function isPlaying() {
   if (domMs === null) return false;
   return performance.now() - stampedAt < PAUSE_AFTER_MS;
 }
 
-/** 這首歌的總長度(毫秒)。拿去跟 LRCLIB 的搜尋結果比對版本用的。 */
+/** 曲目總長度(毫秒),用於比對 LRCLIB 搜尋結果的版本。 */
 export function getDurationMs() {
   return parseTime(document.querySelector(DURATION_SELECTOR)?.textContent) ?? null;
 }

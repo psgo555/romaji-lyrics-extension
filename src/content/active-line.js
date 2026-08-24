@@ -1,36 +1,34 @@
 /**
  * active-line.js
- * 找出「正在唱的那一行」,用來決定先轉換哪一行。
+ * 判定目前演唱中的歌詞行,用於決定轉換順序。
  *
- * 為什麼需要:kuromoji 斷詞是同步的 CPU 工作,一次 40 行不可能瞬間轉完。
- * 如果照 DOM 順序處理,正在唱的那一行會排在它上面所有(已經唱過的)行後面,
- * 使用者就會看到拼音慢半拍才出現。知道哪一行是重點,就能讓它插隊。
+ * kuromoji 斷詞為同步的 CPU 工作,一次 40 行無法即時完成。若依 DOM 順序處理,
+ * 演唱中的行會排在其上方所有已唱過的行之後,拼音因而延遲出現。取得該行的位置
+ * 即可讓它優先處理。
  *
- * ── 實測紀錄(2026-07,Spotify 網頁版)────────────────────────────
- * 掛 MutationObserver 觀察 30 秒,Spotify 在歌詞行上**完全沒有**任何
- * 屬性或 class 變動;所有行的 computed opacity 都是 0.5、color 完全相同。
- * 但畫面上正在唱的那一行確實會變亮並跟著歌走。
+ * 實測結果(2026-07,Spotify 網頁版):以 MutationObserver 觀察 30 秒,Spotify
+ * 在歌詞行上沒有任何屬性或 class 變動;所有行的 computed opacity 皆為 0.5,
+ * color 完全相同。但畫面上演唱中的行確實會變亮並隨歌曲移動。
  *
- * 結論:高亮不是逐行的狀態,而是「位置」造成的(整個容器上蓋漸層/遮罩,
- * 位在焦點的那行就亮)。所以幾何判斷才是對的做法。
+ * 據此判斷,高亮並非逐行的狀態,而是位置造成的效果 —— 容器整體套上漸層或遮罩,
+ * 位於焦點的行因而變亮。幾何判斷才是正確的作法。
  *
- * 這反而比抓 class 名稱耐用 —— 這個擴充功能已經被 Spotify 改版
- * (lyrics-line-always-visible → lyrics-line)打壞過一次,
- * 幾何位置不會因為改版而失效。
+ * 該作法亦較比對 class 名稱耐用:本擴充功能曾因 Spotify 改版
+ * (lyrics-line-always-visible → lyrics-line)而失效一次,幾何位置不受改版影響。
  *
- * 還是保留了屬性/class 的判斷放在前面,萬一哪天 Spotify 加回明確標記,
- * 不用改程式就會自動改用比較準的那個。
+ * 屬性與 class 的判斷仍保留於鏈的前段:Spotify 日後若加回明確標記,
+ * 無須修改程式即會自動改用精確度較高的策略。
  */
 
 const LOG = '[romaji]';
 
-/** 我們自己加的屬性,判斷時必須跳過,否則會自己回饋自己 */
+/** 本擴充功能自身的屬性前綴,判斷時必須排除,否則會形成自我回饋 */
 const OWN_ATTR_PREFIX = 'data-romaji';
 
 /**
  * 判斷結果的快取有效期。
- * getComputedStyle / getBoundingClientRect 都會逼瀏覽器重算版面,不能每次都問。
- * 要比呼叫端的更新節奏(ACTIVE_TICK_MS)略短,否則等於白做一次。
+ * getComputedStyle 與 getBoundingClientRect 皆會觸發版面重算,不宜每次呼叫。
+ * 須略短於呼叫端的更新節奏(ACTIVE_TICK_MS),否則等同無效。
  */
 const CACHE_MS = 100;
 
@@ -41,7 +39,7 @@ let cachedAt = 0;
 
 /* ----------------------------------------------------------- 各種策略 */
 
-/** 明確的無障礙標記,最可信 */
+/** 明確的無障礙標記,可信度最高 */
 function byAriaCurrent(lines) {
   return lines.findIndex((el) => {
     const value = el.getAttribute('aria-current');
@@ -49,14 +47,14 @@ function byAriaCurrent(lines) {
   });
 }
 
-/** class 裡有 active / current / highlight / playing 之類的字樣 */
+/** class 中含 active / current / highlight / playing 等字樣 */
 function byClassName(lines) {
   const re = /(^|[-_])(active|current|highlight|playing|sung)([-_]|$)/i;
   const hits = lines.filter((el) => [...el.classList].some((token) => re.test(token)));
   return hits.length === 1 ? lines.indexOf(hits[0]) : -1;
 }
 
-/** 只有一行帶著某個值為 "true" 的 data-* 屬性(排除我們自己加的) */
+/** 僅有一行帶有值為 "true" 的 data-* 屬性(排除本擴充功能自身的屬性) */
 function byUniqueDataAttr(lines) {
   const counts = new Map();
   for (const el of lines) {
@@ -73,7 +71,7 @@ function byUniqueDataAttr(lines) {
   return -1;
 }
 
-/** 只有一行特別不透明(其他行被調暗) */
+/** 僅有一行未被調暗 */
 function byUniqueOpacity(lines) {
   let best = -1;
   let bestValue = -Infinity;
@@ -91,16 +89,16 @@ function byUniqueOpacity(lines) {
     }
   });
 
-  // 全部一樣(實測就是這種情況)代表這個訊號沒有資訊量
+  // 全部相同(實測即為此情況)表示此訊號沒有鑑別力
   return tie || best < 0 ? -1 : best;
 }
 
 /**
- * 取得這一行裡「Spotify 自己的那個元素」。
+ * 取得該行中屬於 Spotify 的元素。
  *
- * 我們把原文搬進 .romaji-original 之後,Spotify 原本的內層元素還在裡面。
- * 高亮的樣式是套在那個內層元素上,不是套在歌詞行本身 ——
- * 這就是為什麼直接量歌詞行的 color/opacity 每一行都一模一樣。
+ * 原文被移入 .romaji-original 後,Spotify 原有的內層元素仍在其中。高亮樣式套用於
+ * 該內層元素而非歌詞行本身,這即是直接量測歌詞行的 color 與 opacity 時每行皆相同
+ * 的原因。
  */
 function spotifyInner(lineEl) {
   const original = lineEl.querySelector(':scope > .romaji-original');
@@ -109,14 +107,13 @@ function spotifyInner(lineEl) {
 }
 
 /**
- * 內層元素的樣式跟其他行不一樣的那一行。
+ * 內層元素樣式與其他行相異的那一行。
  *
- * 實測:純拼音模式下原文被藏起來,看不到 Spotify 的高亮;
- * 但原文混合模式下,正在唱的那句日文是白的、其餘是灰的。
- * 也就是說高亮確實存在,只是在內層。這裡就是去讀它。
+ * 實測:純拼音模式下原文隱藏,無從觀察 Spotify 的高亮;原文混合模式下,
+ * 演唱中的該句日文為白色,其餘為灰色。高亮確實存在,位置在內層元素上。
  *
- * 用「只有一行是這個樣式」來判斷,不寫死任何顏色值 ——
- * Spotify 換配色或換主題都不會壞。
+ * 判定依據為「僅有一行採用此樣式」,不比對任何固定的顏色值,
+ * Spotify 更換配色或主題皆不受影響。
  */
 function byInnerStyle(lines) {
   const signatures = lines.map((el) => {
@@ -129,7 +126,7 @@ function byInnerStyle(lines) {
     counts.set(signature, (counts.get(signature) ?? 0) + 1);
   }
 
-  // 需要至少兩種樣式,而且目標樣式只有一行有 —— 否則沒有鑑別力
+  // 須至少存在兩種樣式,且目標樣式僅有一行採用,否則不具鑑別力
   if (counts.size < 2) return -1;
   const unique = [...counts].filter(([, count]) => count === 1);
   if (unique.length !== 1) return -1;
@@ -138,9 +135,9 @@ function byInnerStyle(lines) {
 }
 
 /**
- * 往上找真正會捲動的那個祖先。
- * auto-scroll.js 也要用同一個判斷 —— 標記高亮跟自動置中必須認定同一個容器,
- * 各找各的話會在 Spotify 改版時默默分岔。
+ * 向上尋找實際可捲動的祖先元素。
+ * auto-scroll.js 使用同一項判斷 —— 標記高亮與自動置中必須認定同一個容器,
+ * 各自實作會在 Spotify 改版時安靜地分歧。
  */
 export function findScrollParent(el) {
   let node = el?.parentElement;
@@ -155,10 +152,10 @@ export function findScrollParent(el) {
 }
 
 /**
- * 幾何:最接近焦點的那一行。
+ * 幾何判斷:最接近焦點的行。
  *
- * Spotify 會自動把正在唱的那行捲到固定位置,所以「誰在焦點上」
- * 就等於「誰正在被唱」。沒有可捲動祖先時退回用視窗中心。
+ * Spotify 會將演唱中的行捲至固定位置,位於焦點者即為演唱中的行。
+ * 無可捲動祖先時,退回以視窗中心為焦點。
  */
 function byGeometry(lines) {
   const container = findScrollParent(lines[0]);
@@ -172,7 +169,7 @@ function byGeometry(lines) {
 
   lines.forEach((el, index) => {
     const rect = el.getBoundingClientRect();
-    if (rect.height === 0) return; // 還沒排版好的跳過
+    if (rect.height === 0) return; // 尚未完成排版,略過
     const distance = Math.abs(rect.top + rect.height / 2 - focus);
     if (distance < bestDistance) {
       bestDistance = distance;
@@ -187,17 +184,17 @@ const STRATEGIES = [
   ['aria-current', byAriaCurrent],
   ['class', byClassName],
   ['data-attr', byUniqueDataAttr],
-  ['inner-style', byInnerStyle], // 實測有效:高亮在內層元素上
+  ['inner-style', byInnerStyle], // 實測有效:高亮位於內層元素
   ['opacity', byUniqueOpacity],
-  ['geometry', byGeometry], // 最後的保險,不依賴任何 Spotify 的實作細節
+  ['geometry', byGeometry], // 最終保險,不依賴任何 Spotify 的實作細節
 ];
 
 /* ----------------------------------------------------------- 對外介面 */
 
 /**
- * 找出正在唱的那一行的索引。
+ * 取得演唱中該行的索引。
  * @param {HTMLElement[]} lines
- * @returns {number} 找不到時回 -1
+ * @returns {number} 無法判定時回 -1
  */
 export function findActiveIndex(lines) {
   if (!lines.length) return -1;
@@ -205,7 +202,7 @@ export function findActiveIndex(lines) {
   const now = performance.now();
   if (now - cachedAt < CACHE_MS) return cachedIndex;
 
-  // 先試上次贏的那個策略,省下每次重跑整條鏈的成本
+  // 優先嘗試上次成功的策略,省去每次重跑整條鏈的成本
   if (winningStrategy) {
     const entry = STRATEGIES.find(([name]) => name === winningStrategy);
     const index = entry ? entry[1](lines) : -1;
@@ -215,7 +212,7 @@ export function findActiveIndex(lines) {
       cachedAt = now;
       return index;
     }
-    // 連續失敗兩次才重新探測,避免偶爾一次抖動就整條鏈重跑
+    // 連續失敗兩次才重新探測,避免單次抖動導致整條鏈重跑
     if (++missStreak < 2) {
       cachedAt = now;
       return cachedIndex;
@@ -228,7 +225,7 @@ export function findActiveIndex(lines) {
     if (index < 0) continue;
     winningStrategy = name;
     missStreak = 0;
-    // 記錄一次,日後 Spotify 改版時從 Console 就能看出換了哪個策略
+    // 記錄一次,Spotify 日後改版時可自 Console 得知策略的變化
     console.info(`${LOG} 用「${name}」判斷正在唱的那一行`);
     cachedIndex = index;
     cachedAt = now;
@@ -241,13 +238,13 @@ export function findActiveIndex(lines) {
 }
 
 /**
- * 把 data-romaji-active="true" 標在正在唱的那一行上。
+ * 於演唱中的行標記 data-romaji-active="true"。
  *
- * 這個屬性是佇列排序唯一的優先權訊號 —— 排序時只要讀屬性,
- * 不必再跑一次(會觸發版面重算的)幾何判斷。
+ * 該屬性是佇列排序唯一的優先權訊號 —— 排序時僅需讀取屬性,
+ * 無須再次執行會觸發版面重算的幾何判斷。
  *
  * @param {HTMLElement[]} lines
- * @returns {number} 標記的索引,-1 代表判斷不出來
+ * @returns {number} 標記的索引,-1 表示無法判定
  */
 export function markActive(lines) {
   const index = findActiveIndex(lines);
