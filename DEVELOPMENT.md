@@ -368,7 +368,9 @@ kuromoji 不處理阿拉伯數字,會將其原樣輸出:`50年を50億で買お�
 
 早期版本的 `enabled` 欄位與 `'below'` / `'above'` 等值已不再使用。`getSettings()` 對無法辨識的值會退回預設,無須手動清除。
 
-## 關鍵 DOM 選擇器(實測於 Spotify 網頁版,2026-08)
+## 關鍵 DOM 選擇器
+
+以下為 Spotify 網頁版的實測結果(2026-08)。
 
 ```
 單行歌詞: [data-testid="lyrics-line"]
@@ -377,158 +379,153 @@ kuromoji 不處理阿拉伯數字,會將其原樣輸出:`50年を50億で買お�
 歌曲長度: [data-testid="playback-duration"]     文字,格式 "4:03"
 ```
 
-歌詞按鈕的 `aria-pressed` 用來判斷使用者有沒有真的打開歌詞檢視 —— 這是 LRCLIB fallback 的前提條件。
+歌詞按鈕的 `aria-pressed` 用於判定使用者是否確實開啟歌詞檢視,為 LRCLIB 備援的前提條件。
 
-### 實測結論(踩過坑才問出來的,不要憑猜測改)
+### 實測結論
 
-這個擴充功能**已經被 Spotify 改版打壞過一次**(`lyrics-line-always-visible` → `lyrics-line`),所以以下每一條都是實際探測出來的:
+本擴充功能曾因 Spotify 改版而失效(`lyrics-line-always-visible` → `lyrics-line`)。以下各項均為實際探測結果,不宜以推測取代。
 
-| 發現 | 影響 |
+| 觀察 | 影響 |
 |---|---|
-| 歌詞**容器**沒有專屬的 `data-testid` | 不靠容器選擇器,直接抓歌詞行,observer 掛在 `document.body` |
-| 歌詞行之間**完全沒有**屬性或 class 差異,computed opacity/color 也全部相同 | 「正在唱的是哪一行」不能靠歌詞行本身判斷 |
-| 但高亮確實存在,而且套在**內層元素**上 | `active-line.js` 的 `inner-style` 策略去讀內層樣式;實測就是這條勝出 |
-| 頁面上**沒有** `<audio>`/`<video>`(`querySelectorAll` 回空陣列) | 拿不到 `currentTime`;而且內容有 DRM,音訊本身也取不到 |
-| `playback-progressbar` **沒有** `aria-valuenow`,也找不到任何 `[role="slider"]` | 沒有現成的數值可讀 |
-| 進度只有秒的精度,但文字**跳動的瞬間**很準(實測連續三次間隔都是 1.00 秒) | `playback-clock.js` 用 MutationObserver 抓跳動當基準點 + 內插,把精度補到 100ms 以內 |
-| 有些歌詞的振假名是**純文字**寫在漢字後面,不是 `<ruby>` 標記 | 見下方「行內振假名」 |
+| 歌詞**容器**無專屬 `data-testid` | 不使用容器選擇器,直接取歌詞行,observer 掛於 `document.body` |
+| 歌詞行之間無屬性或 class 差異,computed opacity 與 color 亦相同 | 無法由歌詞行本身判定演唱中的行 |
+| 高亮實際套用於**內層元素** | `active-line.js` 的 `inner-style` 策略讀取內層樣式,實測為勝出策略 |
+| 頁面無 `<audio>` / `<video>` 元素 | 無法取得 `currentTime`;內容具 DRM,音訊本身亦無法取得 |
+| `playback-progressbar` 無 `aria-valuenow`,亦無 `[role="slider"]` | 無現成數值可讀 |
+| 進度僅有秒精度,但文字**跳動的瞬間**準確(實測連續三次間隔皆為 1.00 秒) | `playback-clock.js` 以 MutationObserver 擷取跳動作為基準點並內插,精度可達 100ms 以內 |
+| 部分歌詞的振假名為純文字置於漢字後,非 `<ruby>` 標記 | 見「讀音修正字典」的行內振假名一節 |
 
-### 選擇器失效時怎麼查
+亦曾探測播放速度控制的可行性:主頁面與所有同源 iframe 均無媒體元素,攔截 `HTMLMediaElement.prototype.play` 亦無觸發,判定 Spotify 網頁版未使用媒體元素播放,`playbackRate` 無從設定。
 
-失效時 content script 會靜默不動作。到頁面 Console(**要把左上角的 context 從 `top` 切到本擴充功能**,否則看不到訊息也沒有 `chrome` API)看 `[romaji]` 開頭的訊息。探測指令範例:
+### 選擇器失效時的排查
+
+失效時 content script 不會拋出錯誤,而是靜默停止作用。於頁面 Console 檢視 `[romaji]` 開頭的訊息,**須將左上角的 context 由 `top` 切換至本擴充功能**,否則無法看到訊息亦無 `chrome` API。
 
 ```js
-// 目前有哪些跟歌詞/播放有關的 testid
+// 目前與歌詞、播放相關的 testid
 [...document.querySelectorAll('[data-testid]')].map(e => e.dataset.testid)
   .filter((t,i,a) => a.indexOf(t) === i).filter(t => /lyric|play|progress|position/i.test(t));
 
-// 某一行歌詞的實際結構(確認有沒有 ruby、內層是什麼)
+// 單行歌詞的實際結構
 document.querySelector('[data-testid="lyrics-line"]').innerHTML;
 ```
 
-注意:容器 class 名稱含有 "paywall" 字樣,部分帳號類型可能看不到歌詞面板。
+容器的 class 名稱含 "paywall" 字樣,部分帳號類型可能無法顯示歌詞面板。
 
-## 同步高亮(逐句 / 逐字)
+## 同步高亮
 
-高亮**不是**靠觀察 Spotify 的畫面推斷的 —— 那樣先天會慢半拍,而且拿不到句子內部的進度。改成用播放時間推算:
+高亮不由觀察 Spotify 畫面推斷。該方式先天延遲,且無法取得句子內部的進度。改以播放時間推算:
 
 ```
 playback-position 文字跳動 → 基準點 + performance.now() 內插 → 目前毫秒
 LRCLIB syncedLyrics → parseLrc → 每一句的起始時間
-兩者對齊 → 現在第幾句 + 這句唱到幾成
+兩者對齊 → 目前句次 + 該句進度
 ```
 
 | 模組 | 職責 |
 |---|---|
-| `playback-clock.js` | 播放進度(秒精度 + 內插)、暫停偵測、拖動進度條後重新對齊 |
+| `playback-clock.js` | 播放進度(秒精度加內插)、暫停偵測、拖動進度條後重新對齊 |
 | `lrc.js` | LRC 解析(含逐字標籤 `<mm:ss.xx>`) |
-| `sync-highlight.js` | 把 LRC 對到畫面上的行、算進度、逐字上色 |
+| `sync-highlight.js` | 時間軸對齊畫面歌詞、計算進度、逐字上色 |
 
-**兩個刻意的設計決定:**
+### 對齊失敗時不強行套用
 
-1. **對不上就不硬做。** LRCLIB 與畫面歌詞比對低於 50%(版本不同、Live 版)就整組放棄,退回觀察畫面的舊做法。錯位的高亮比沒有高亮更糟。
+LRCLIB 與畫面歌詞的比對低於 50%(版本不同、Live 版)即整組放棄,退回觀察畫面的方式。錯位的高亮較無高亮更糟。
 
-   **但要講出來。** 放棄之後畫面上看起來跟壞掉一樣,而且 popup 的「延遲校正」滑桿在這種歌上怎麼拖都沒反應。所以這兩種情況(LRCLIB 沒有同步歌詞、時間軸對不上)都會在畫面左下角浮出一則會自己消失的提示([src/content/notice.js](src/content/notice.js)),說明拼音照常顯示、只是不會逐字亮。不講的話使用者的結論會是「這個擴充功能時好時壞」。
-2. **逐字掃描分兩條路,而且要知道自己走在哪一條。** 有逐字時間軸(enhanced LRC)時走真資料,準;沒有的時候依句距估算。
+此時畫面表現與故障相近,且設定中的提前量滑桿不會產生任何效果。因此在 LRCLIB 無同步歌詞、或時間軸對不上兩種情況下,會於畫面左下角顯示一則自動消失的提示(`notice.js`),說明拼音仍正常顯示但不會逐字高亮。
 
-   估算**先天無法準確**:只有句首時間的話,「唱得快」和「唱得慢」的句子在資料上**完全一樣**,任何估算都只能在兩種誤差之間換邊、不能消除(實測驗證過:調快會變成有些句子唱完才掃完,調慢會變成快的句子拖在後面)。所以 `index.js` 的兩個參數不是為了「估得更準」——那做不到——而是**把出錯的幅度限制住**:
+### 逐字掃描的兩條路徑
 
-   | 參數 | 擋的是什麼 |
-   |---|---|
-   | `SWEEP_SPAN_FACTOR`(0.92) | 句中換氣、小停頓讓實際演唱短於句距,等速掃會偏慢。乘略小於 1 的係數,讓掃描在下一句開始前收尾 |
-   | `SWEEP_MS_PER_LETTER`(180) | 句尾接長間奏時句距遠大於演唱長度(唱 2 秒卻隔 8 秒),照句距掃會拖成唱完才掃到四分之一。改由字數封頂,掃完就停著等 |
+具備逐字時間軸(enhanced LRC)時採用實際資料;無逐字資料時依句距估算。
 
-   覺得掃描普遍偏快或偏慢,調這兩個值(在 [src/content/index.js](src/content/index.js));覺得整體對不上歌聲,那是提前量的問題,調 popup 的滑桿。
+估算先天無法精確:僅有句首時間時,演唱速度不同的句子在資料上完全相同,任何估算只能在兩種誤差之間取捨。因此下列兩個參數的用途是限制誤差幅度,而非提高精度。
 
-提前量(`syncOffsetMs`)做成 popup 滑桿,因為音訊緩衝、顯示延遲、個人想要多少預讀時間都不一樣,沒有放諸四海皆準的值。
+| 參數 | 位置 | 作用 |
+|---|---|---|
+| `SWEEP_SPAN_FACTOR`(0.92) | `index.js` | 句中換氣與停頓使實際演唱短於句距,等速掃描會偏慢。乘以略小於 1 的係數,使掃描於下一句開始前結束 |
+| `sweepMsPerLetter`(180) | `settings.js` | 句尾接續長間奏時句距遠大於演唱長度,依句距掃描會導致整句唱完僅掃描四分之一。改以字數封頂 |
 
-## 改動之後一定要跑的驗證
+掃描整體偏快或偏慢時調整上述參數;整體與歌聲不同步則屬提前量問題,應調整設定中的滑桿。
 
-**每次改動都要做這三項**,順序不能反:
+## 驗證項目
 
-```bash
-npm test               # 純函式的自動測試(180 項,不到一秒)
-npm run check:imports  # 漏 import 靜態掃描(build 攔不到,見下方)
-npm run build          # src/ → dist/,Chrome 載入的是 dist/
-```
-
-然後 `chrome://extensions` 重新載入 → Spotify 分頁 **`Ctrl+Shift+R`**。
-最後那步不能省:重新載入擴充功能會**殺掉已開分頁裡的舊 content script**,而 Chrome 不會自動注入新的。漏掉的話症狀是「完全沒有任何 `[romaji]` 訊息,也沒有錯誤」。
-
-### 漏 import 的檢查(這個專案已經崩潰過三次)
-
-esbuild 對未定義的全域識別字**不報錯**,build 階段攔不到。而「用 vm 執行 `dist/content.js`」的煙霧測試只跑到模組載入,抓不到**只在某條分支才會呼叫到**的漏 import(例如只有擴充功能被重新載入時才執行的 `shutdown()`)。
-
-所以還要做靜態掃描:比對每支模組「呼叫了什麼」與「import 了什麼」,找出用了別的模組的函式卻沒有 import 的情況。
+每次改動均須執行下列三項,順序不可調換:
 
 ```bash
-npm run check:imports
+npm test               # 純函式測試(180 項)
+npm run check:imports  # 遺漏 import 的靜態掃描
+npm run build          # src/ → dist/
 ```
 
-實作在 [tools/check-imports.mjs](tools/check-imports.mjs)。
+隨後於 `chrome://extensions` 重新載入擴充功能,並於 Spotify 分頁執行 `Ctrl+Shift+R`。
 
-**掃描器回報「乾淨」不等於真的乾淨 —— 壞掉的掃描器也會回報乾淨。** 這不是空話:第一版就是對真實 `src/` 回報乾淨,拿真實程式碼複製一份、故意還原歷史上那兩處漏 import 去驗,才發現它只抓到 `stopClock`、**完全抓不到 `DEFAULTS`**。兩個獨立的洞:
+最後一步不可省略:重新載入擴充功能會終止既有分頁中的 content script,而 Chrome 不會自動注入新的執行個體。省略時的症狀為完全無 `[romaji]` 訊息,亦無錯誤。
 
-- `{ ...DEFAULTS }` 的展開運算子三個點,被「排除 `obj.prop`」的規則誤判成屬性存取而整個跳過 —— 而崩潰 #3 的原始形態正好就是這一種
-- 把任何 `(…)` 後接 `{` 都當函式參數列,於是 `if (x) {` 的條件式內容也被列入白名單,任何在 if 條件裡出現過的名字都會被消音
+### 遺漏 import 的檢查
 
-改這支掃描器之前先看它的檔頭註解,並且用「複製 src、拿掉一個 import、確認會被抓到」的方式驗過再信它。
+esbuild 對未定義的全域識別字不報錯,建置階段無法攔截。以 vm 執行 `dist/content.js` 的煙霧測試僅涵蓋模組載入,無法偵測僅在特定分支才會呼叫的遺漏(例如僅於擴充功能重新載入時執行的 `shutdown()`)。
 
-### 自動測試(`npm test`)
+因此需另行靜態掃描,比對各模組「呼叫的名稱」與「import 的名稱」。實作於 `tools/check-imports.mjs`。
 
-純函式的部分在 `test/` 底下,用 Node 內建的測試工具,不需要任何額外套件,
-也不載入 kuromoji 辭典,所以整套跑完是毫秒級的:
+**掃描器回報無問題不等於實際無問題。** 第一版對真實 `src/` 回報通過,以複製的程式碼還原歷史上兩處遺漏進行驗證後,才發現其僅能偵測 `stopClock`,完全無法偵測 `DEFAULTS`。原因為兩個獨立的缺陷:
 
-| 檔案 | 測什麼 |
-| --- | --- |
-| `corrections.test.js` | 長詞優先、消耗式比對、**內建讀音逐筆對照** |
-| `macron.test.js` | 長音符移除,重點是**長度不變**(切分資料沿用的前提) |
+- `{ ...DEFAULTS }` 的展開運算子被「排除 `obj.prop`」的規則誤判為屬性存取而整段略過
+- 將所有 `(…)` 後接 `{` 視為函式參數列,使 `if (x) {` 的條件內容進入白名單,任何出現於 if 條件中的名稱均被忽略
+
+修改該工具前應先閱讀其檔頭註解,並以「複製 src、移除一個 import、確認能被偵測」的方式驗證。
+
+### 自動測試
+
+測試位於 `test/`,使用 Node 內建測試工具,不需額外套件,亦不載入 kuromoji 辭典。
+
+| 檔案 | 涵蓋範圍 |
+|---|---|
+| `corrections.test.js` | 長詞優先、消耗式比對、內建讀音逐筆對照、空原文的無限迴圈防護 |
+| `macron.test.js` | 長音符移除,重點為長度不變 |
+| `numbers.test.js` | 阿拉伯數字轉漢字數字,含不予改寫的三種情況 |
 | `lrc.test.js` | 時間標籤換算、多標籤展開、逐字標籤、offset |
-| `cjk.test.js` | 日文判定、找出沒轉出來的字、字串位置換算字母索引 |
-| `sync-highlight.test.js` | 對齊(重複副歌)、補洞後強制遞增、逐字進度內插 |
-| `settings.test.js` | 值的正規化、模式循環走完四個 |
+| `cjk.test.js` | 日文判定、未轉換字的偵測、字串位置換算字母索引 |
+| `reading.test.js` | 讀音格式驗證、羅馬拼音轉假名 |
+| `sync-highlight.test.js` | 對齊(含重複副歌)、補洞後強制遞增、逐字進度內插 |
+| `settings.test.js` | 值的正規化、模式循環、顏色與字級的範圍 |
+| `selection.test.js` | 選詞器的範圍計算 |
+| `drag-bounds.test.js` | 面板位置的邊界夾制 |
+| `auto-scroll.test.js` | 捲動距離計算 |
+| `shared-dictionary.test.js` | 共用字典驗證,含限定單曲的條目 |
+| `apply-reading.test.js` | issue 內容解析、寫入字典、以驗證器覆核 |
 
-**這套測試是拿注入已知錯誤的方式驗過的**,不是寫完就相信:
+測試本身以注入已知錯誤的方式驗證過:
 
-- 把「二人」的讀音改成無關的「でたらめ」→ 2 項失敗
-- 讓 `stripMacrons` 改變字串長度 → 4 項失敗
+- 將「二人」的讀音改為無關值 → 2 項失敗
+- 使 `stripMacrons` 改變字串長度 → 4 項失敗
 
-兩者都回非零結束碼。第一項特別重要 —— 它正是 `legacy/` 那三支示範腳本
-**抓不到**的錯誤(它們會照樣印「✓ 已修正」並 exit 0)。
+兩者均回傳非零結束碼。第一項尤其重要,該類錯誤正是 `legacy/` 的三支示範腳本無法偵測的(其會照常輸出「已修正」並以 0 結束)。
 
-> `legacy/` 的三支已改名為 `npm run demo:kana` / `demo:kanji` / `demo:corrections`,
-> 名稱上就標明它們是目視示範、不是驗證。要看含辭典的實際轉換結果時才用。
+`legacy/` 的三支腳本已更名為 `npm run demo:kana` / `demo:kanji` / `demo:corrections`,名稱上標明其為目視示範而非驗證。需檢視含辭典的實際轉換結果時使用。
 
-### 其他已驗證
+### 其他已驗證項目
 
-- esbuild 正確套用 kuromoji 的 `browser` 欄位,打包進去的是 `BrowserDictionaryLoader`(XHR 讀 `.dat.gz`),沒有殘留 Node 的 `fs`
-- LRCLIB 請求:用 Node 測試會拿到 403(Cloudflare 擋自動化流量),但從擴充功能發出的請求帶的是真正的瀏覽器指紋,實測可以通過。測法:`chrome://extensions` → 本擴充功能的 service worker → Console → `await fetchLyrics('曲名', '歌手名')`,再執行一次應看到 `命中快取` 且無網路請求
+- esbuild 正確套用 kuromoji 的 `browser` 欄位,打包結果為 `BrowserDictionaryLoader`(以 XHR 讀取 `.dat.gz`),未殘留 Node 的 `fs`
+- LRCLIB 請求以 Node 測試會得到 403(Cloudflare 阻擋自動化流量),自擴充功能發出的請求可通過。測法:`chrome://extensions` → service worker → Console → `await fetchLyrics('曲名', '歌手名')`,再次執行應顯示命中快取且無網路請求
 
-## 未來可以做的
+## 待處理事項
 
-> 這一節先前列的三件事(LRCLIB 浮動面板、popup 的自訂讀音清單、平假名注音模式)
-> **其實都已經做完了**,清單卻沒跟著更新。
-> 加完功能記得回來刪掉對應項目 —— 過期的待辦比沒有待辦更糟,
-> 它會讓看的人以為功能不存在而重做一遍。
+- **`chrome.storage.local` 的手動斷字資料無上限亦無過期機制**(`split:` 前綴)。實測 26 筆連同歌詞快取約 277KB,距上限尚遠,但僅增不減。可考慮加入 LRU 或過期機制,並於設定介面提供清除入口(自訂讀音已有管理清單,斷字尚無)
+- **LRCLIB 快取僅於讀取時檢查過期**,未再播放的曲目記錄會持續保留
+- **平台相關的選擇器分散於 `index.js` 與 `playback-clock.js`**。抽出為設定檔後,新增其他平台僅需增加對應檔案
+- 專案尚無 linter 與 formatter
 
-- **`chrome.storage.local` 的手動切分資料沒有上限也沒有過期**(`split:` 開頭那些)。
-  實測 26 筆、連同歌詞快取共約 277KB,離上限還很遠,但只進不出。
-  要做的話:加 LRU 或過期,並在 popup 給一個「清除切分資料」的出口
-  (自訂讀音已經有管理清單了,切分還沒有)
-- **LRCLIB 快取只在被讀到時才檢查過期**,聽過一次就沒再聽的歌記錄會一直留著。
-  手動清法見下方「清掉歌詞快取」
-- 專案還沒有 `git init`,也沒有 linter / formatter
+> 加入功能後應同步移除此處對應項目。過期的待辦清單較無清單更糟,會使閱讀者誤判功能不存在而重複實作。
 
-### 清掉歌詞快取
+### 清除歌詞快取
 
-改了挑選邏輯(語言、版本)之後,舊記錄仍是用舊規則挑的。
-在 `chrome://extensions` → 本擴充功能的 service worker → Console:
+變更曲目挑選邏輯(語言、版本)後,既有記錄仍以舊規則挑選。於 `chrome://extensions` → service worker → Console:
 
 ```js
 const all = await chrome.storage.local.get(null);
 const keys = Object.keys(all).filter((k) => k.startsWith('lrclib:'));
 await chrome.storage.local.remove(keys);
-console.log('清掉', keys.length, '筆,之後會用新規則重抓');
+console.log('已清除', keys.length, '筆');
 ```
 
-只清歌詞快取,手動切分(`split:` 開頭)不受影響。
+僅清除歌詞快取,手動斷字(`split:` 前綴)不受影響。
