@@ -1,102 +1,117 @@
 # 開發說明
 
-這份是給要改程式的人看的。只是想使用的話請看 [README](README.md) ——
-那邊不需要任何開發工具。
+本文件說明架構與設計決策。使用方式請見 [README](README.md)。
 
-這裡記的多半是**為什麼這樣做**,而不是「做了什麼」。
-很多段落是踩過坑之後補上的,拿掉那些理由,同一個坑會再被踩一次。
-
-## 先跑起來
+## 環境建置
 
 ```bash
 npm install
-npm run build     # 產生 dist/
-npm test          # 180 項純函式測試,不到一秒
+npm run build          # 打包至 dist/
+npm test               # 180 項純函式測試
 ```
 
-然後到 `chrome://extensions` → 開啟**開發人員模式** → 「載入未封裝項目」→ 選 `dist/`。
+於 `chrome://extensions` 啟用開發人員模式,點選「載入未封裝項目」並選擇 `dist/`。
 
-改完 **一定要跑 `npm run check:imports`** —— 那道檢查擋的是「打包不報錯、
-載入不報錯,使用者按下儲存才炸」的漏 import(真的發生過)。
+修改後須執行 `npm run check:imports`。該檢查偵測遺漏的 import —— 此類錯誤不會使打包或載入失敗,僅在執行到該路徑時才拋出 ReferenceError。
 
-## 這份文件不用從頭讀
+## 章節導覽
 
-挑你要動的地方看就好:
-
-| 你要改什麼 | 看哪一節 |
+| 修改範圍 | 相關章節 |
 |---|---|
-| 先搞懂全貌 | 技術方案、專案結構 |
-| 日文轉成拼音的結果不對 | 自定義讀音修正字典、使用者自訂讀音、為什麼要拿掉長音符 |
-| 高亮的時機、逐字掃描 | 同步高亮、掃描速度為什麼做成可調的 |
-| Spotify 改版把東西打壞了 | 關鍵 DOM 選擇器 |
-| 畫面上的互動 | 手動切分羅馬拼音、平假名注音模式、LRCLIB 浮動歌詞面板、設定(popup) |
-| 送出改動之前 | 改動之後一定要跑的驗證 |
+| 整體架構 | 技術方案、專案結構 |
+| 轉換結果不正確 | 讀音修正字典、使用者自訂讀音、長音符處理 |
+| 高亮時機、逐字掃描 | 同步高亮、掃描速度 |
+| Spotify 改版導致失效 | 關鍵 DOM 選擇器 |
+| 畫面互動 | 手動斷字、平假名模式、LRCLIB 面板、設定介面 |
+| 提交前 | 驗證項目 |
 
-其餘章節記的是**為什麼這樣做**。不必先讀 —— 但改到那一塊之前值得看一眼,
-那些理由多半是踩過坑才寫下來的。
+各章節記錄的多為設計理由。修改對應區塊前建議先行閱讀。
 
 ## 技術方案
 
-- **形式**: Chrome Extension (Manifest V3)
-- **平台**: Spotify 網頁版 (`open.spotify.com`)
-- **轉換函式庫**: kuroshiro + kuroshiro-analyzer-kuromoji(漢字→假名→羅馬拼音),漢字混合的歌詞也能轉
-- **歌詞來源**: 優先讀取 Spotify 頁面 DOM,抓不到時 fallback 到 LRCLIB API
+| 項目 | 內容 |
+|---|---|
+| 形式 | Chrome Extension(Manifest V3) |
+| 平台 | Spotify 網頁版 `open.spotify.com` |
+| 轉換 | kuroshiro + kuroshiro-analyzer-kuromoji(漢字 → 假名 → 羅馬拼音) |
+| 歌詞來源 | 優先讀取 Spotify 頁面 DOM;無歌詞時改用 LRCLIB API |
 
 ## 專案結構
 
 ```
-├── build.mjs                     esbuild 打包 + 複製辭典 + 產生圖示
-├── public/manifest.json          MV3 設定
-├── src/
-│   ├── shared/settings.js        設定的預設值與讀寫(content 與 popup 共用)
-│   ├── content/
-│   │   ├── index.js              抓 Spotify 歌詞 DOM、插入羅馬拼音、優先佇列
-│   │   ├── romaji.js             kuroshiro 初始化與轉換(羅馬拼音/平假名,含結果快取)
-│   │   ├── macron.js             長音符處理(romaji.js 與 splitter.js 共用同一套規則)
-│   │   ├── cjk.js                日文字元判定、找出沒轉出來的字
-│   │   ├── corrections.js        內建讀音修正字典(純邏輯,不可相依 chrome)
-│   │   ├── corrections-store.js  使用者自訂讀音的儲存與合併
-│   │   ├── correction-popover.js 點擊補讀音的面板
-│   │   ├── active-line.js        判斷「正在唱的是哪一行」
-│   │   ├── playback-clock.js     播放進度(秒精度 + 內插)
-│   │   ├── lrc.js                LRC 時間軸解析(含逐字標籤)
-│   │   ├── sync-highlight.js     時間軸對齊畫面歌詞、逐字上色
-│   │   ├── toggle-button.js      播放列上的顯示方式切換鈕
-│   │   ├── splitter.js           手動切分拼音(點擊插入/取消空格)
-│   │   ├── lrc-panel.js          Spotify 沒歌詞時的 LRCLIB 浮動面板
-│   │   └── overlay.css           拼音外觀與四種顯示模式、浮動面板樣式
-│   ├── background/
-│   │   └── service-worker.js     LRCLIB API + 快取 + 請求去重
-│   └── popup/                    設定介面(顯示方式、提前量、掃描速度、自訂讀音管理)
-├── legacy/                       前五步的驗證腳本,保留作為紀錄
-└── dist/                         ← build 產出,「載入未封裝項目」要選這個資料夾
+build.mjs                       esbuild 打包、複製辭典、產生第三方聲明
+public/manifest.json            MV3 設定
+
+src/shared/
+  settings.js                   設定的預設值、範圍與讀寫(content 與 popup 共用)
+  shared-dictionary.js          共用讀音字典的驗證
+
+src/content/
+  index.js                      歌詞 DOM 處理、拼音插入、轉換佇列、事件委派
+  romaji.js                     kuroshiro 初始化與轉換(含結果快取)
+  numbers.js                    阿拉伯數字轉漢字數字(轉換前處理)
+  macron.js                     長音符處理(romaji.js 與 splitter.js 共用)
+  cjk.js                        日文字元判定、未轉換字的偵測
+  reading.js                    讀音格式驗證與羅馬拼音轉假名
+  corrections.js                內建讀音修正字典(純邏輯,不相依 chrome)
+  corrections-store.js          自訂讀音的儲存與四層合併
+  correction-popover.js         補讀音與修正讀音的面板
+  selection-range.js            面板選詞器的範圍計算
+  active-line.js                判斷目前演唱的歌詞行
+  playback-clock.js             播放進度(秒精度加內插)
+  lrc.js                        LRC 時間軸解析(含逐字標籤)
+  sync-highlight.js             時間軸對齊與逐字上色
+  auto-scroll.js                將演唱中的歌詞行捲至畫面中央
+  splitter.js                   手動斷字的資料模型與渲染
+  toggle-button.js              播放列上的顯示方式切換鈕
+  lrc-panel.js                  LRCLIB 歌詞浮動面板
+  drag-bounds.js                面板位置的邊界夾制
+  notice.js                     畫面角落的暫時提示
+  overlay.css                   拼音外觀、顯示模式、面板樣式
+
+src/background/
+  service-worker.js             LRCLIB 查詢、共用字典下載、快取與請求去重
+
+src/popup/                      設定介面
+tools/                          開發工具(見下)
+legacy/                         早期驗證腳本,僅作紀錄
+dist/                           打包產物,「載入未封裝項目」須選此目錄
 ```
 
 ### npm scripts
 
 | 指令 | 用途 |
 |---|---|
-| `npm run build` | 打包到 `dist/` |
-| `npm run watch` | 監看 `src/` 自動重新打包(改靜態檔仍需重跑 build) |
-| `npm run check:imports` | 漏 import 靜態掃描(每次改動都要跑,見下方) |
-| `npm run icons` | 從 `public/icon-source.png` 產生三種尺寸的圖示(換圖時才要跑) |
-| `npm run demo:kana` | 步驟2 的 wanakana 純假名轉換驗證 |
-| `npm run demo:kanji` | 步驟2 的 kuroshiro 漢字轉換驗證 |
+| `npm run build` | 打包至 `dist/` |
+| `npm run watch` | 監看 `src/` 自動重新打包(靜態檔仍需重跑 build) |
+| `npm test` | 純函式測試 |
+| `npm run check:imports` | 遺漏 import 的靜態掃描 |
+| `npm run icons` | 由 `public/icon-source.png` 產生三種尺寸的圖示 |
+| `npm run demo:kana` | wanakana 純假名轉換驗證 |
+| `npm run demo:kanji` | kuroshiro 漢字轉換驗證 |
 | `npm run demo:corrections` | 讀音修正字典的前後對照 |
 
-`legacy/` 內是前五步的驗證腳本:`test.js`(wanakana)、`test-kanji.js`(kuroshiro)、以及尚未整合前的 `content.js` 與 `lyrics-fallback.js`,現在的實作分別對應到 `src/content/` 與 `src/background/`。
+### tools/
 
-## 前五步的限制,現在怎麼解的
-
-| 原本的限制 | 現在的做法 |
+| 檔案 | 用途 |
 |---|---|
-| 函式庫不能從 CDN 載入(頁面 CSP 會擋) | `build.mjs` 用 esbuild 把 kuroshiro/kuromoji 打包進 `dist/content.js`,辭典檔複製到 `dist/dict/` 並在 manifest 的 `web_accessible_resources` 開放 |
-| kuromoji 載辭典慢,不能等使用者開面板才初始化 | `src/content/romaji.js` 在模組載入時就啟動 `kuroshiro.init()`,`toRomaji()` 只是 await 同一個 Promise |
-| LRCLIB 呼叫要避開頁面 CSP | 移到 `src/background/service-worker.js`,content script 透過 `chrome.runtime.sendMessage` 呼叫 |
-| 什麼時候才算「這首歌沒歌詞」 | 只有在**歌詞檢視確實被打開**、且連續 12 秒等不到任何歌詞行時才走 fallback。面板沒打開時不下任何結論。查到就用 `src/content/lrc-panel.js` 開浮動面板顯示,詳見下方 |
-| `content.js` 只用 wanakana,漢字不會轉 | 改用 kuroshiro,`mode: 'spaced'`。例:`桜が咲く` → `sakura ga saku` |
-| kuromoji 對部分固定讀法的詞會讀錯 | `src/content/corrections.js` 在送進 kuroshiro 前先取代成正確平假名,詳見下方 |
-| Hepburn 的長音符(`ō` `ē`)看起來像「拼音上面多一條線」 | `src/content/romaji.js` 的 `stripMacrons()` 在轉換出口移除,詳見下方 |
+| `check-imports.mjs` | 掃描跨模組的 export 與 import,偵測遺漏 |
+| `make-icons.mjs` | 產生擴充功能圖示 |
+| `make-shots.mjs` | 將截圖處理為商店規格(1280×800、無 alpha) |
+| `png.mjs` | 不依賴套件的 PNG 讀寫與縮放 |
+| `apply-reading.mjs` | 由 issue 內容寫入 `dictionary.json`,供 CI 使用 |
+
+## 相對於早期原型的變更
+
+| 早期限制 | 現行做法 |
+|---|---|
+| 函式庫無法自 CDN 載入(頁面 CSP 阻擋) | `build.mjs` 以 esbuild 將 kuroshiro 與 kuromoji 打包進 `dist/content.js`;辭典檔複製至 `dist/dict/`,並於 manifest 的 `web_accessible_resources` 開放 |
+| kuromoji 載入辭典耗時,不宜等待使用者開啟面板 | `romaji.js` 於模組載入時即啟動 `kuroshiro.init()`,`toRomaji()` 僅 await 同一個 Promise |
+| LRCLIB 呼叫受頁面 CSP 限制 | 移至 `service-worker.js`,content script 透過 `chrome.runtime.sendMessage` 呼叫 |
+| 「無歌詞」的判定時機 | 僅在歌詞檢視確實開啟、且連續 12 秒無任何歌詞行時才啟用備援。檢視未開啟時不作判定 |
+| 僅使用 wanakana,漢字不轉換 | 改用 kuroshiro,`mode: 'spaced'`。例:`桜が咲く` → `sakura ga saku` |
+| kuromoji 對部分固定讀法讀錯 | `corrections.js` 於送入 kuroshiro 前替換為正確假名 |
+| Hepburn 長音符顯示為母音上方橫線 | `macron.js` 的 `stripMacrons()` 於轉換出口移除 |
 
 ## 為什麼要拿掉長音符
 
