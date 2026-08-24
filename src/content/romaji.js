@@ -1,12 +1,13 @@
 /**
  * romaji.js
- * 把 test-kanji.js 驗證過的 kuroshiro 邏輯搬進擴充功能。
+ * kuroshiro 轉換層,由 test-kanji.js 驗證過的設定移植而來。
  *
- * 兩個關鍵差異(相對於 Node 版的 test-kanji.js):
- * 1. 辭典路徑要指向擴充功能自己的資源(chrome.runtime.getURL),
- *    不是 node_modules。對應 manifest 的 web_accessible_resources。
- * 2. 模組一被載入就開始 init,不等使用者打開歌詞面板。
- *    (README 限制 #2:kuromoji 載辭典很慢,必須提早做)
+ * 與 Node 版 test-kanji.js 的兩項差異:
+ *
+ *   1. 辭典路徑指向擴充功能自身的資源(chrome.runtime.getURL)而非 node_modules,
+ *      對應 manifest 的 web_accessible_resources
+ *   2. 模組載入即開始 init,不等待使用者開啟歌詞面板 —— kuromoji 載入辭典耗時甚久,
+ *      延後啟動會使前幾行歌詞來不及轉換
  */
 
 import Kuroshiro from 'kuroshiro';
@@ -22,12 +23,12 @@ const LOG = '[romaji]';
 const kuroshiro = new Kuroshiro();
 
 /**
- * 轉換結果快取。Spotify 捲動時同一行會被重複 render,沒快取會重跑形態素分析。
+ * 轉換結果快取。Spotify 捲動時同一行會重複 render,無快取則每次重跑形態素分析。
  *
- * key 一定要帶上轉換種類:同一句歌詞轉羅馬拼音跟轉平假名是兩個不同的答案。
- * 只用原文當 key 的話,切到平假名模式會拿到先前存的拼音(反之亦然),
- * 而且因為有快取,那個錯誤結果會一直黏著不會自己好。
- * kind 的取值只有 'romaji' / 'kana',不含冒號,所以拼起來不會撞號。
+ * key 必須包含轉換種類:同一句歌詞轉羅馬拼音與轉平假名是兩個不同的結果。
+ * 僅以原文為 key 時,切換至平假名模式會取得先前存入的拼音(反之亦然),
+ * 且因快取存在,錯誤結果會持續留存。
+ * kind 僅有 'romaji' 與 'kana' 兩種取值,不含冒號,組合後不會產生衝突。
  */
 const cache = new Map();
 const MAX_CACHE = 2000;
@@ -39,14 +40,14 @@ function cacheKey(kind, text) {
 let initError = null;
 
 /**
- * 立刻開始初始化。這是一個 module-level 的 Promise,
- * 之後所有 toRomaji() 呼叫都 await 同一個,不會重複初始化。
+ * 立即開始初始化。此為 module-level 的 Promise,
+ * 後續所有 toRomaji() 呼叫皆 await 同一個實例,不會重複初始化。
  */
 export const ready = (async () => {
   const startedAt = performance.now();
   try {
-    // 自訂讀音也要一起等 —— 否則最早那幾行會用「還沒載入字典」的狀態轉換,
-    // 轉出來是舊的結果又進了快取,使用者會以為自己加的修正沒生效。
+    // 自訂讀音須一併等待:否則最初幾行會在字典尚未載入的狀態下轉換,
+    // 舊結果進入快取後,使用者會認為自己新增的修正未生效。
     await Promise.all([
       kuroshiro.init(new KuromojiAnalyzer({ dictPath: chrome.runtime.getURL('dict/') })),
       loadUserCorrections(),
@@ -59,34 +60,34 @@ export const ready = (async () => {
   }
 })();
 
-// 避免 init 失敗時噴出 unhandled rejection(實際錯誤已在上面記錄)
+// 避免 init 失敗時產生 unhandled rejection(實際錯誤已於上方記錄)
 ready.catch(() => {});
 
-// 判定規則搬到 cjk.js 集中管理(「這行要不要轉」與「哪幾個字沒轉出來」
-// 問的是同一件事),這裡再匯出一次,對外介面不變。
+// 判定規則集中於 cjk.js(「此行是否需要轉換」與「哪些字未轉出」屬同一項判斷),
+// 此處再次轉出,對外介面不變。
 export { hasJapanese };
 
 /**
  * 日文 → 羅馬拼音。
- * mode: 'spaced' 沿用 test-kanji.js 驗證過的設定 — 跟唱時分詞有空格比較好讀。
+ * mode 沿用 test-kanji.js 驗證過的 'spaced':跟唱時分詞空格較易閱讀。
  * @param {string} text
- * @returns {Promise<string|null>} 轉不出來或不需轉時回 null
+ * @returns {Promise<string|null>} 無法轉換或無須轉換時回 null
  */
 export async function toRomaji(text) {
   return convert('romaji', text);
 }
 
 /**
- * 日文 → 平假名讀音。平假名注音模式用這個。
+ * 日文 → 平假名讀音,供平假名注音模式使用。
  *
- * 對「看得懂假名、只卡在漢字」的人來說,這比羅馬拼音好用得多 ——
- * 拼音把整句都換成另一套文字,連本來就讀得出來的假名也一起換掉了。
+ * 對於能閱讀假名、僅受阻於漢字的使用者,此模式較羅馬拼音實用 —— 拼音會將整句
+ * 換為另一套文字,連原本即可讀出的假名亦一併替換。
  *
- * mode 同樣用 'spaced':分詞空格讓長句好斷,跟拼音那邊一致,
- * 逐字掃描也才有 span 可以上色。
+ * mode 同樣採 'spaced':分詞空格便於斷讀長句,與拼音模式一致,
+ * 逐字掃描亦需要對應的 span 才能上色。
  *
  * @param {string} text
- * @returns {Promise<string|null>} 轉不出來或不需轉時回 null
+ * @returns {Promise<string|null>} 無法轉換或無須轉換時回 null
  */
 export async function toKana(text) {
   return convert('kana', text);
@@ -95,10 +96,9 @@ export async function toKana(text) {
 /**
  * 兩種轉換共用的流程。
  *
- * 之所以合成一支:除了「送給 kuroshiro 的 to 是什麼」以及
- * 「要不要拿掉長音符」之外,判斷、快取、修正字典、錯誤處理全部一樣。
- * 各寫一份的話,哪天改了其中一邊(例如加了一道前處理),
- * 另一邊就會安靜地走上不同的路。
+ * 合併為單一實作的原因:除了傳給 kuroshiro 的 to 參數,以及是否移除長音符之外,
+ * 判定、快取、修正字典與錯誤處理完全相同。分開實作時,單方面的變更(例如新增
+ * 一道前處理)會使另一方安靜地走上不同路徑。
  *
  * @param {'romaji'|'kana'} kind
  */
@@ -112,11 +112,10 @@ async function convert(kind, text) {
   if (initError) return null;
 
   try {
-    // 先把已知會被 kuromoji 讀錯的詞換成正確的平假名讀音,再送去斷詞。
-    // kuroshiro 不會重新判斷平假名的讀音,所以取代過的部分保證轉對。
-    // 詳見 corrections.js。
-    // 阿拉伯數字換成漢字數字,量詞的不規則讀法才吃得到辭典(見 numbers.js)。
-    // 順序要在修正之後:修正是拿原文比對的,先換數字會讓含數字的條目對不上。
+    // 先將已知會被 kuromoji 讀錯的詞替換為正確的平假名讀音,再送入斷詞。
+    // kuroshiro 不會重新判斷平假名的讀音,替換過的部分因而保證正確,詳見 corrections.js。
+    // 接著將阿拉伯數字改寫為漢字數字,量詞的不規則讀法才能取自辭典(見 numbers.js)。
+    // 順序須置於修正之後:修正以原文比對,先改寫數字會使含數字的條目無法命中。
     const corrected = digitsToKanji(applyCorrections(text));
     const converted = await kuroshiro.convert(corrected, {
       to: kind === 'kana' ? 'hiragana' : 'romaji',
@@ -124,13 +123,13 @@ async function convert(kind, text) {
     });
 
     /*
-     * 平假名模式不動:那邊的長音本來就寫成「おう」「うう」這樣的假名,
-     * 而原樣留著的 ー 在假名輸出裡是正確寫法,不是錯誤。
+     * 平假名模式不作處理:該模式的長音本即寫為「おう」「うう」等假名,
+     * 而原樣保留的 ー 在假名輸出中屬正確寫法。
      *
-     * 羅馬拼音模式要做三件事:
-     *   stripMacrons        把 ā ō 這種頭上一橫拿掉(長度不變)
-     *   stripProlongMarks   字典不認識的詞會把 ー 原樣吐出來,那不是羅馬字
-     *   stripIterationMarks 同理,活到最後的 々 代表它沒配對到任何字
+     * 羅馬拼音模式須處理三項:
+     *   stripMacrons        移除 ā ō 的長音符(長度不變)
+     *   stripProlongMarks   辭典未收錄的詞會原樣輸出 ー,該符號並非羅馬字
+     *   stripIterationMarks 同理,殘留至此的 々 表示未配對到任何字
      */
     const trimmed = converted ? converted.trim() : null;
     const result = trimmed
@@ -139,7 +138,7 @@ async function convert(kind, text) {
         : stripIterationMarks(stripProlongMarks(stripMacrons(trimmed)))
       : null;
 
-    // 簡單的容量上限:滿了就清掉最舊的一筆(Map 保證插入順序)
+    // 容量上限:達到後移除最舊的一筆(Map 保證插入順序)
     if (cache.size >= MAX_CACHE) {
       cache.delete(cache.keys().next().value);
     }
@@ -152,19 +151,18 @@ async function convert(kind, text) {
 }
 
 /**
- * 清掉轉換結果的快取。
- * 使用者新增/刪除自訂讀音之後一定要呼叫,否則畫面上還是舊的轉換結果。
+ * 清除轉換結果快取。
+ * 使用者新增或刪除自訂讀音後須呼叫,否則畫面仍顯示先前的轉換結果。
  */
 export function invalidateRomajiCache() {
   cache.clear();
 }
 
 /**
- * 試轉一行,但套用「還沒存檔的那一筆修正」,而且**不進快取**。
- * 修正 popover 的即時預覽用這個。
+ * 試轉一行,套用尚未存檔的修正,且不寫入快取。供修正面板的即時預覽使用。
  *
  * @param {string} text 原始歌詞行
- * @param {{surface: string, reading: string}|null} candidate 正在試的那筆
+ * @param {{surface: string, reading: string}|null} candidate 正在試用的修正
  */
 export async function previewRomaji(text, candidate) {
   if (!text) return null;
@@ -172,11 +170,11 @@ export async function previewRomaji(text, candidate) {
   if (initError) return null;
 
   try {
-    // 跟 convert() 走完全一樣的前處理,預覽才會等於實際結果
+    // 前處理與 convert() 完全一致,預覽才會等同於實際結果
     const corrected = digitsToKanji(previewCorrections(text, candidate));
     const romaji = await kuroshiro.convert(corrected, { to: 'romaji', mode: 'spaced' });
-    // 要跟 convert() 的出口做完全一樣的處理 —— 預覽跟實際結果長得不一樣的話,
-    // 使用者是照著預覽決定要不要存的,那等於騙他
+    // 出口處理亦須與 convert() 完全一致:使用者依據預覽決定是否儲存,
+    // 預覽與實際結果不符即為誤導
     return romaji ? stripIterationMarks(stripProlongMarks(stripMacrons(romaji.trim()))) : null;
   } catch (err) {
     console.warn(`${LOG} 預覽轉換失敗:`, text, err);

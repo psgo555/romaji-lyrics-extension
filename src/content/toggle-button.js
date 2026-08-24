@@ -1,19 +1,14 @@
 /**
  * toggle-button.js
- * 在 Spotify 播放列的「歌詞」按鈕旁邊插入一顆切換鈕,
- * 點一下就依序循環 displayMode:
- * romaji-only → both → kana → off → romaji-only。
+ * 於 Spotify 播放列的歌詞按鈕旁插入切換鈕,點擊即依序循環 displayMode。
  *
- * (順序以 settings.js 的 DISPLAY_MODES 為準,這裡只是說明 ——
- *  先前這行漏掉了後來才加的 kana,列成三個而實際有四個。)
+ * 循環順序以 settings.js 的 DISPLAY_MODES 為準。
  *
- * 同步機制:按鈕不自己記狀態,而是寫進 chrome.storage.sync(跟 popup 同一份設定),
- * 再由 storage.onChanged 回頭更新按鈕外觀。所以頁面按鈕與 popup 單選鈕
- * 永遠是同一個真相來源,兩邊都會即時反映對方的變更。
+ * 按鈕不自行保存狀態,而是寫入 chrome.storage.sync,再由 storage.onChanged 更新外觀。
+ * 頁面按鈕與 popup 選項因而共用同一份設定,任一端的變更會即時反映於另一端。
  *
- * 生命週期:Spotify 是 SPA,播放列會被 React 重建。
- * 這裡不自己開 observer,而是由 index.js 每秒的 tick() 呼叫 syncToggleButton(),
- * 錨點消失就把按鈕收掉,錨點回來就重新插入。
+ * Spotify 為 SPA,播放列會被 React 重建。本模組不自行建立 observer,而由 index.js
+ * 每秒的 tick() 呼叫 syncToggleButton():錨點消失時移除按鈕,錨點出現時重新插入。
  */
 
 import { describeMode, nextMode } from '../shared/settings.js';
@@ -34,7 +29,7 @@ export function renderToggleButton(mode) {
   buttonEl.textContent = current.short;
   buttonEl.dataset.romajiToggle = current.value;
 
-  // label 本身就講得夠清楚了(「原文 + 下方羅馬拼音」),不需要再補一段說明
+  // label 已含完整描述(「原文 + 下方羅馬拼音」),無須額外補述
   const description = `羅馬拼音:${current.label}\n點一下切換到:${upcoming.label}`;
   buttonEl.title = description;
   buttonEl.setAttribute('aria-label', description);
@@ -44,7 +39,7 @@ function createButton() {
   const button = document.createElement('button');
   button.type = 'button';
   button.className = BUTTON_CLASS;
-  // 不要讓點擊冒泡到 Spotify 自己的播放列控制項
+  // 避免點擊冒泡至 Spotify 自身的播放列控制項
   button.addEventListener('click', (event) => {
     event.preventDefault();
     event.stopPropagation();
@@ -54,26 +49,26 @@ function createButton() {
 }
 
 /**
- * 確保按鈕在正確位置。每秒被呼叫一次,所以要能便宜地重複執行。
+ * 確保按鈕位於正確位置。每秒呼叫一次,重複執行的成本須維持低廉。
  * @param {() => string} getMode 目前的 displayMode
- * @param {() => void} onCycle 點擊時要跑的切換邏輯
+ * @param {() => void} onCycle 點擊時執行的切換邏輯
  */
 export function syncToggleButton(getMode, onCycle) {
   onCycleHandler = onCycle;
 
   const anchor = document.querySelector(ANCHOR_SELECTOR);
 
-  // 歌詞按鈕不在(沒在播放、或 Spotify 還沒渲染完)→ 收掉自己的按鈕,下次再等
+  // 歌詞按鈕不存在(未播放,或 Spotify 尚未完成渲染):移除按鈕,待下次檢查
   if (!anchor) {
     buttonEl?.remove();
     buttonEl = null;
     return;
   }
 
-  // 已經在正確的位置就什麼都不用做
+  // 位置正確,無須處理
   if (buttonEl?.isConnected && buttonEl.previousElementSibling === anchor) return;
 
-  // React 重建播放列時我們的按鈕會被丟掉或錯位,重新插一顆
+  // React 重建播放列時按鈕會遺失或錯位,重新插入
   buttonEl?.remove();
   buttonEl = createButton();
   anchor.insertAdjacentElement('afterend', buttonEl);
