@@ -1,31 +1,24 @@
 /**
  * drag-bounds.js
- * 拖曳之後,面板該落在哪裡。
+ * 將面板位置夾在可視範圍內。
  *
- * ── 這段唯一的責任:不要讓面板跑到抓不回來的地方 ────────────────
- * 拖到畫面外面本身不會出錯,但使用者會**失去把它拉回來的方法** ——
- * 標題列(唯一能抓的地方)一旦超出畫面,滑鼠就再也點不到它了。
- * 那種狀態只能靠重新整理頁面解除,而使用者不會知道要那樣做。
+ * 標題列是唯一的拖曳把手,若超出畫面即無法再以滑鼠選取,只能重新整理頁面。
+ * 因此夾制的目的是可回復性,而非版面美觀。
  *
- * 所以夾住的重點不是「好看」,是**永遠留一條路回來**。
- *
- * 不 import 任何東西,所以 Node 測得到。
+ * 本模組不相依任何其他模組,可直接以 Node 測試。
  */
 
 /**
- * 把位置夾在畫面內。
+ * 將位置夾在可視範圍內。
  *
- * @param {{left: number, top: number}} pos 想放的位置
- * @param {{width: number, height: number}} size 面板大小
- * @param {{width: number, height: number}} viewport 視窗大小
- * @param {number} [margin] 邊緣至少留多少
- * @returns {{left: number, top: number}}
+ * @param {{left: number, top: number}} pos 目標位置
+ * @param {{width: number, height: number}} size 面板尺寸
+ * @param {{width: number, height: number}} viewport 可視範圍尺寸
+ * @param {number} [margin] 邊緣保留距離
+ * @returns {{left: number, top: number}} 夾制後的整數座標
  */
 export function clampToViewport(pos, size, viewport, margin = 8) {
-  /*
-   * 面板比畫面還大時(視窗被縮得很小),maxLeft 會小於 margin。
-   * 那時一律靠左上角 —— 至少標題列在畫面裡,抓得到。
-   */
+  // 面板大於可視範圍時上限會小於下限,取兩者較大值使面板貼齊左上角
   const maxLeft = Math.max(margin, viewport.width - size.width - margin);
   const maxTop = Math.max(margin, viewport.height - size.height - margin);
 

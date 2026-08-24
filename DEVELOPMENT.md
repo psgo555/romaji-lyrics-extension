@@ -9,7 +9,6 @@
 ## 先跑起來
 
 ```bash
-cd files
 npm install
 npm run build     # 產生 dist/
 npm test          # 180 項純函式測試,不到一秒
