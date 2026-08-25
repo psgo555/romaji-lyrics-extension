@@ -393,11 +393,29 @@ html[data-romaji-mode='kana'] .romaji-overlay {
   transition: color 0.15s ease, opacity 0.15s ease;
 }
 
+/*
+ * 未在演唱的行。
+ *
+ * 顏色一定要走 var(--romaji-color) —— 此處原本寫死 #1db954,而它比
+ * 上方的 .romaji-overlay(0,1,0)更具體(0,3,1),於是純拼音模式下
+ * 使用者在設定裡挑的顏色完全不生效,整片永遠是 Spotify 綠。
+ * 純拼音是預設模式,等於那個設定對多數使用者形同不存在。
+ *
+ * 淡化交由 opacity,不以改變顏色達成 —— 如此才能同時做到「看得出是
+ * 使用者所選的顏色」與「與正在演唱的那一行拉開對比」。
+ */
 html[data-romaji-mode='romaji-only'] [data-romaji-processed] .romaji-overlay {
-  color: #1db954;
+  color: var(--romaji-color, #1db954);
   opacity: 0.32; /* 未在演唱者壓得夠暗,對比才拉得開 */
 }
 
+/*
+ * 正在演唱的行刻意維持白色,不跟隨使用者的顏色設定。
+ *
+ * 這一行是使用者實際在讀的那一行,辨識度優先於配色一致 ——
+ * 不論他挑了多暗或多低對比的顏色,正在演唱的那一句都必須清楚。
+ * 與上一條規則同為 (0,3,1),靠位置在後勝出,毋須提高特異性。
+ */
 html[data-romaji-mode='romaji-only'] [data-romaji-active='true'] .romaji-overlay {
   color: #fff; /* 與 Spotify 原生歌詞的高亮一致:亮白 */
   opacity: 1;
