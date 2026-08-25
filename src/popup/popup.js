@@ -21,13 +21,13 @@ import {
 } from '../shared/settings.js';
 
 /*
- * 這一支在 src/content/ 底下,但它其實不綁 content script ——
- * 它只碰 chrome.storage 與純邏輯,popup 一樣跑得動。
+ * corrections-store.js 位於 src/content/ 之下,但並不綁定 content script ——
+ * 它只觸及 chrome.storage 與純邏輯,在 popup 中同樣可以執行。
  *
- * 為什麼寧可跨目錄匯入也不在 popup 自己寫一份:那裡面有儲存格式版本、
- * 內建表與使用者表的合併規則、以及 sync 的容量上限檢查。
- * 複製一份出來,兩邊遲早會對這些規則有不同的理解 —— 而那種不一致
- * 不會噴錯,只會讓使用者的資料安靜地壞掉。(長音符那次就是這樣。)
+ * 寧可跨目錄匯入亦不在 popup 自寫一份的原因:該模組內含儲存格式版本、
+ * 內建表與使用者表的合併規則,以及 sync 的容量上限檢查。
+ * 複製一份出來,兩端遲早會對這些規則產生不同的理解 —— 而該類不一致
+ * 不會產生錯誤,只會使使用者的資料無聲損壞(長音符那次即是如此)。
  */
 import {
   loadUserCorrections,
@@ -64,7 +64,7 @@ function renderModes(current) {
 
     button.append(label);
     button.addEventListener('click', async () => {
-      renderModes(mode.value); // 先更新畫面,不等 storage 寫完
+      renderModes(mode.value); // 先更新畫面,不等 storage 寫入完成
       await setSetting('displayMode', mode.value);
     });
 
@@ -73,11 +73,11 @@ function renderModes(current) {
 }
 
 /*
- * 滑桿的範圍與刻度從 settings.js 帶進來,HTML 裡不寫死。
+ * 滑桿的範圍與刻度自 settings.js 取得,HTML 中不寫死。
  *
- * 那三個數字跟 normalizeOffset 夾範圍用的是同一組;寫兩份的話,改了 HTML
- * 卻忘了改 settings.js 就會變成「滑桿拉得到 3000,存進去被砍回 2000」——
- * 畫面顯示跟實際生效不一致,而且不會有任何錯誤訊息。
+ * 那三個數字與 normalizeOffset 夾範圍所用的是同一組;分成兩份的話,
+ * 修改 HTML 而未同步修改 settings.js 即成為「滑桿拉得到 3000,存入卻被砍回 2000」
+ * —— 畫面顯示與實際生效不一致,且不會產生任何錯誤訊息。
  */
 scaleEl.min = String(ROMAJI_SCALE_MIN);
 scaleEl.max = String(ROMAJI_SCALE_MAX);
@@ -87,31 +87,27 @@ offsetEl.min = String(SYNC_OFFSET_MIN);
 offsetEl.max = String(SYNC_OFFSET_MAX);
 offsetEl.step = String(SYNC_OFFSET_STEP);
 
-/** 存的是毫秒,顯示成「提早 0.9 秒」—— 沒人在讀毫秒的 */
+/** 內部存的是毫秒,顯示為「提早 0.9 秒」—— 使用者不讀毫秒 */
 function renderOffset(value) {
   offsetEl.value = String(value);
   offsetValueEl.textContent = describeOffset(value);
 }
 
 /*
- * 拖曳過程中就寫入(input 事件),不等放開(change 事件)——
- * 這樣使用者可以一邊播一邊拖,即時看到對不對得上。
- * content script 那邊是靠 storage.onChanged 立即套用的。
- */
-/*
- * 拖曳過程中寫入要節流。
+ * 拖曳過程中即更新畫面(input 事件),但寫入須節流。
  *
- * chrome.storage.sync 有每分鐘約 120 次的寫入上限,超過之後**接下來所有
- * 寫入都會失敗** —— 包括別的功能。而滑桿拖一次會連發幾十個 input 事件,
- * 幾秒鐘就能把額度用光,然後使用者去存自訂讀音就會莫名其妙失敗。
- * (實際發生過:拖滑桿調整之後,補讀音按儲存沒反應。)
+ * 採 input 而非 change 的原因:使用者要能一邊播放一邊拖曳,即時看出是否對得上。
+ * content script 是靠 storage.onChanged 套用的。
  *
- * 這個陷阱在自訂讀音的輸入框已經避開了(那裡用 change 不用 input),
- * 但滑桿當初漏掉,踩了同一個坑。
+ * 寫入須節流的原因:chrome.storage.sync 有每分鐘約 120 次的寫入上限,
+ * 超過之後接下來所有寫入都會失敗 —— 包含其他功能。而滑桿拖曳一次會連發
+ * 數十個 input 事件,數秒鐘即可耗盡額度,此後使用者儲存自訂讀音便會莫名失敗。
+ * (實際發生過:拖曳滑桿調整之後,補讀音按下儲存沒有反應。)
+ * 該陷阱在自訂讀音的輸入框已避開(該處用 change 而非 input),滑桿當初漏掉。
  *
- * 畫面**立刻**更新、只有寫入延後 —— 拖的時候還是即時看得到數字,
- * 停手 250ms 才真的寫進去。content script 是靠 storage.onChanged 套用的,
- * 所以實際效果會慢那一下下,對「一邊播一邊對準」完全不影響。
+ * 畫面立即更新、僅寫入延後 —— 拖曳時仍即時看得到數字,停手 250ms 才真正寫入。
+ * content script 既然是靠 storage.onChanged 套用,實際效果會慢那一瞬,
+ * 對「一邊播放一邊對準」完全沒有影響。
  */
 const WRITE_DEBOUNCE_MS = 250;
 let offsetWriteTimer = null;
@@ -134,20 +130,20 @@ offsetEl.addEventListener('input', () => {
 /*
  * 以 0.5 秒為單位的加減按鈕。
  *
- * 為什麼在滑桿之外還要這個:滑桿一格是 50ms,要移動 0.5 秒得拉十格,
- * 而使用者實際感覺到的是「早了大概半秒」這種粒度 —— 用滑桿去湊很難對準。
- * 滑桿保留下來,是因為粗調對準之後往往還想微調一點點。
+ * 於滑桿之外仍需此組按鈕的原因:滑桿一格為 50ms,要移動 0.5 秒須拉十格,
+ * 而使用者實際感受到的是「早了大約半秒」這種粒度 —— 以滑桿湊很難對準。
+ * 滑桿仍予保留,是因為粗調對準之後往往還想微調。
  *
- * 關鍵是**兩者調的是同一個值**:按鈕不自己記狀態,而是讀目前的值加減之後,
- * 走跟滑桿完全相同的那條路(normalizeOffset → 畫面 → 儲存)。
- * 各記一份的話兩邊遲早會對不上 —— 這個專案已經在別處踩過這種坑。
+ * 關鍵在於兩者調整的是同一個值:按鈕不自行記錄狀態,而是讀取目前的值加減後,
+ * 走與滑桿完全相同的路徑(normalizeOffset → 畫面 → 儲存)。
+ * 各自記錄一份的話兩端遲早會對不上 —— 本專案已在他處踩過此類問題。
  *
- * 夾範圍的事完全交給 normalizeOffset,這裡不重複判斷上下限。
+ * 夾範圍完全交由 normalizeOffset 處理,此處不重複判斷上下限。
  */
 function nudgeOffset(deltaMs) {
   const value = normalizeOffset(Number(offsetEl.value) + deltaMs);
   renderOffset(value);
-  // 按鈕也走節流那條:使用者可能連按好幾下對準,那一樣是連續寫入
+  // 按鈕同樣走節流:使用者可能連按數下對準,那一樣是連續寫入
   saveOffsetSoon(value);
 }
 
@@ -159,11 +155,11 @@ for (const id of ['offset-later', 'offset-earlier']) {
 /* ------------------------------------------------------------ 拼音外觀 */
 
 /*
- * 顏色與大小,跟提前量走同一套節流。
+ * 顏色與大小與提前量走同一套節流。
  *
- * 色盤跟滑桿都是拖曳型的控制項,拖一次會連發幾十個事件。不節流會把
- * chrome.storage.sync 的寫入額度用光,而症狀會出現在**完全無關的地方**
- * (補讀音存不進去)。那個坑已經踩過一次了。
+ * 色盤與滑桿皆為拖曳型控制項,拖曳一次會連發數十個事件。不節流會耗盡
+ * chrome.storage.sync 的寫入額度,而症狀會出現在完全無關之處
+ * (自訂讀音存不進去)。該問題已發生過一次。
  */
 let appearanceWriteTimer = null;
 
@@ -176,7 +172,7 @@ function saveAppearanceSoon(key, value) {
 
 function renderColor(value) {
   colorEl.value = value;
-  // 選中的色塊要標出來,不然使用者看不出目前是哪一個
+  // 選中的色塊須標示出來,否則使用者看不出目前是哪一個
   for (const swatch of document.querySelectorAll('.swatch')) {
     swatch.style.background = swatch.dataset.color;
     swatch.setAttribute('aria-pressed', String(swatch.dataset.color === value));
@@ -200,7 +196,7 @@ scaleEl.addEventListener('input', () => {
   saveAppearanceSoon('romajiScale', value);
 });
 
-// 色塊只是捷徑,調的是同一個值、走同一條路
+// 色塊僅是捷徑,調整的是同一個值、走同一條路徑
 for (const swatch of document.querySelectorAll('.swatch')) {
   swatch.addEventListener('click', () => {
     const value = normalizeColor(swatch.dataset.color);
@@ -210,12 +206,12 @@ for (const swatch of document.querySelectorAll('.swatch')) {
 }
 
 /*
- * 這裡曾經有一組「掃描快慢」的控制項,拿掉了。
+ * 此處曾有一組「掃描快慢」的控制項,已移除。
  *
- * 理由見 settings.js 的說明:一句唱多久是歌本身決定的,調快會讓字掃到底後
- * 停在句尾乾等、調慢會在換行時被截斷,兩邊都不對。掃描的正確行為只有一種。
- * 使用者感覺到的「太快」其實是整體時間差,那由上面的提前量處理 ——
- * 它讓整句與逐字一起平移,不會拆散兩者的關係。
+ * 理由見 settings.js 的說明:一句唱多久由歌曲本身決定,調快會使字掃到底後
+ * 停在句尾等待、調慢會在換行時被截斷,兩個方向皆不正確。掃描的正確行為只有一種。
+ * 使用者感受到的「太快」實為整體時間差,由上方的提前量處理 ——
+ * 它使整句與逐字一併平移,不致拆散兩者的關係。
  */
 
 /* ------------------------------------------------------------ 自訂讀音 */
@@ -224,7 +220,7 @@ function showCorrectionError(message) {
   correctionsErrorEl.textContent = message ?? '';
 }
 
-/** 儲存層回報的失敗原因翻成使用者看得懂的話 */
+/** 將儲存層回報的失敗原因轉為使用者看得懂的說法 */
 function describeFailure(reason) {
   if (reason === 'quota') {
     return '自訂讀音已達瀏覽器同步儲存的上限,請先刪掉幾筆再試。';
@@ -240,7 +236,7 @@ function buildRow(surface, reading) {
   const surfaceEl = document.createElement('span');
   surfaceEl.className = 'correction-surface';
   surfaceEl.textContent = surface;
-  surfaceEl.title = surface; // 太長被省略時,滑上去仍看得到完整內容
+  surfaceEl.title = surface; // 過長而被省略時,游標移上仍看得到完整內容
 
   const arrow = document.createElement('span');
   arrow.className = 'correction-arrow';
@@ -252,7 +248,7 @@ function buildRow(surface, reading) {
   input.spellcheck = false;
   input.setAttribute('aria-label', `${surface} 的讀音`);
 
-  // 邊打邊標,不要等到存檔才說「這個不能用」
+  // 邊輸入邊標示,不待存檔才告知「這個不能用」
   input.addEventListener('input', () => {
     const ok = isValidReading(input.value.trim());
     input.setAttribute('aria-invalid', String(!ok));
@@ -260,14 +256,14 @@ function buildRow(surface, reading) {
   });
 
   /*
-   * change 而不是 input:每敲一個字就寫一次 storage 會撞到
-   * chrome.storage.sync 的寫入頻率上限,撞到之後接下來的寫入會整批失敗。
-   * 離開欄位或按 Enter 時存一次就夠。
+   * 採 change 而非 input:每輸入一個字即寫入一次 storage 會撞上
+   * chrome.storage.sync 的寫入頻率上限,撞上之後接下來的寫入會整批失敗。
+   * 離開欄位或按下 Enter 時寫入一次即已足夠。
    */
   input.addEventListener('change', async () => {
     const next = input.value.trim();
 
-    // 清空當作「取消這筆修正」,跟按叉叉同義
+    // 清空視為「取消這筆修正」,與按下叉叉同義
     if (!next) {
       await removeRow(surface);
       return;
@@ -283,14 +279,14 @@ function buildRow(surface, reading) {
     const result = await addUserCorrection(surface, next);
     if (!result.ok) {
       showCorrectionError(describeFailure(result.reason));
-      input.value = reading; // 沒存成功就還原,免得畫面說謊
+      input.value = reading; // 未儲存成功即還原,避免畫面與實際不符
       return;
     }
     showCorrectionError(null);
   });
 
   input.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') input.blur(); // blur 會觸發上面的 change
+    if (event.key === 'Enter') input.blur(); // blur 會觸發上方的 change
     if (event.key === 'Escape') {
       input.value = reading;
       input.blur();
@@ -319,8 +315,8 @@ async function removeRow(surface) {
 }
 
 function renderCorrections(entries) {
-  // 照原文排序,位置才穩定 —— 物件的鍵序是「誰先被加進來」,
-  // 使用者改一筆讀音就會讓那一列跳到別的地方去。
+  // 依原文排序,位置才穩定 —— 物件的鍵序取決於加入的先後,
+  // 使用者修改一筆讀音便會使該列跳至別處。
   const list = Object.entries(entries).sort(([a], [b]) => a.localeCompare(b, 'ja'));
 
   correctionsCountEl.textContent = list.length ? `${list.length} 筆` : '';
@@ -340,8 +336,8 @@ function renderCorrections(entries) {
 }
 
 /**
- * 頁面上那顆切換鈕改了設定時,開著的 popup 要立刻跟上。
- * (自己按 popup 選項時也會觸發,重畫成同一個值,無害)
+ * 頁面上那顆切換鈕變更設定時,開啟中的 popup 須立即跟上。
+ * (自行按下 popup 選項時亦會觸發,重繪為同一個值,無害)
  */
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'sync') return;
@@ -352,13 +348,13 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 /*
- * 自訂讀音在別處被改了(另一個分頁的 Spotify 頁面補了一個讀音、
- * 或其他裝置同步過來)就重畫。
+ * 自訂讀音在他處被變更(另一個分頁的 Spotify 頁面補了讀音,
+ * 或由其他裝置同步而來)即重繪。
  *
- * 但**正在編輯時不能重畫** —— 存檔本身就會觸發這個回呼,
- * 重畫會把使用者正在打字的那個 input 整個換掉,游標與還沒存的內容一起消失。
- * 用 activeElement 判斷而不是設旗標:焦點在不在列表裡是畫面的實際狀態,
- * 旗標則要靠每個路徑都記得升降,遲早會漏。
+ * 但正在編輯時不可重繪 —— 存檔本身即會觸發這個回呼,
+ * 重繪會將使用者正在輸入的那個 input 整個替換,游標與尚未儲存的內容一併消失。
+ * 以 activeElement 判斷而非設立旗標:焦點是否在列表內是畫面的實際狀態,
+ * 旗標則須仰賴每條路徑都記得升降,遲早會有遺漏。
  */
 onCorrectionsChanged((entries) => {
   if (correctionsEl.contains(document.activeElement)) return;

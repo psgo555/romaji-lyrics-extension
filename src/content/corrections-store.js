@@ -2,13 +2,13 @@
  * corrections-store.js
  * 使用者自訂讀音的儲存層。
  *
- * 為什麼需要:kuromoji 的內建辭典(IPADIC)一定會有讀不出來或讀錯的詞 ——
- * 罕用漢字、專有名詞、歌詞裡的特殊寫法。每遇到一個就要改程式碼重新 build
- * 太慢了,所以讓使用者直接在畫面上補,存進瀏覽器、立刻生效、之後所有歌曲通用。
+ * 必要性:kuromoji 的內建辭典(IPADIC)必然存在讀不出來或讀錯的詞 ——
+ * 罕用漢字、專有名詞、歌詞中的特殊寫法。每遇到一個便修改程式碼重新 build
+ * 過於緩慢,故讓使用者直接在畫面上補上,存入瀏覽器後立即生效,之後所有歌曲通用。
  *
  * 職責分工:
- * - corrections.js  純邏輯,不碰 chrome API(Node 測試會直接匯入它)
- * - 這一支          負責讀寫 chrome.storage,把合併後的表灌回去
+ * - corrections.js  純邏輯,不觸及 chrome API(Node 測試直接匯入它)
+ * - 本模組          負責讀寫 chrome.storage,並將合併後的表灌回
  */
 
 import {
@@ -23,9 +23,9 @@ const KEY = 'userCorrections';
 const VERSION = 1;
 
 /*
- * chrome.storage.sync 的限制:單一項目 8192 bytes、總共 102400 bytes。
- * 超過就整筆寫入失敗,而且不太會有明顯的錯誤 —— 使用者只會覺得「存不進去」。
- * 所以寫入前先量,留一點餘裕就擋下來並明白告訴他。
+ * chrome.storage.sync 的限制:單一項目 8192 bytes、總計 102400 bytes。
+ * 超過即整筆寫入失敗,且不太會有明顯的錯誤 —— 使用者只會覺得「存不進去」。
+ * 故寫入前先行測量,保留餘裕即攔下並明確告知。
  */
 const QUOTA_BYTES = 7000;
 
@@ -34,42 +34,42 @@ let entries = {};
 const listeners = new Set();
 
 /*
- * 讀音的驗證搬到 reading.js 了 —— 跟「把輸入轉成假名」放在一起,
- * 那兩件事是同一個問題的兩面,拆開放的話放寬了其中一邊就會對不上。
- * 另一個原因:這支檔案有 module-level 的 chrome 呼叫、Node 測不到,
- * 而讀音驗證正是最需要測的部分。
+ * 讀音的驗證已移至 reading.js —— 與「將輸入轉為假名」置於一處,
+ * 那兩件事是同一個問題的兩面,分開放置時放寬其中一邊便會對不上。
+ * 另一個原因:本檔案含有 module-level 的 chrome 呼叫、Node 測不到,
+ * 而讀音驗證正是最需要測試的部分。
  *
- * 注意這裡是**兩行**,不是一行。
+ * 注意此處是兩行,不是一行。
  *
- * `export { x } from './y.js'` 只是把 x 轉給別的模組用,**不會**在這支檔案裡
- * 建立一個叫 x 的名字。下面 addUserCorrection 自己要呼叫 isValidReading,
- * 所以還需要一個真正的 import。
+ * `export { x } from './y.js'` 僅是將 x 轉給其他模組使用,不會在本檔案中
+ * 建立一個名為 x 的名字。下方 addUserCorrection 自身要呼叫 isValidReading,
+ * 因此還需要一個真正的 import。
  *
- * 少了 import 那行的症狀:打包不報錯、載入也不報錯,一路要到使用者
- * 真的按下儲存才炸 ReferenceError —— 而且畫面上只會顯示「存不了」。
- * (這就是它上線的方式,不是假設。)
+ * 缺少 import 那一行的症狀:打包不報錯、載入亦不報錯,直到使用者
+ * 真正按下儲存才拋出 ReferenceError —— 而畫面上只會顯示「存不了」。
+ * (那正是它上線的方式,並非假設。)
  */
 import { isValidReading } from './reading.js';
 export { READING_PATTERN, isValidReading } from './reading.js';
 
-// 曲名的正規化必須跟驗證那一支用同一份 —— 各寫一份的話,
-// 字典裡收的曲名跟這裡查的曲名會在空白或大小寫上悄悄對不上。
+// 曲名的正規化必須與驗證那一支共用同一份 —— 各寫一份的話,
+// 字典收錄的曲名與此處查詢的曲名會在空白或大小寫上無聲地對不上。
 import { normalizeSongTitle } from '../shared/shared-dictionary.js';
 
-/** 大家共用的那份(從 GitHub 抓回來的),還沒抓到之前是空的 */
+/** 共用的那一份(自 GitHub 取得),尚未取得前為空 */
 let shared = [];
 
 /**
- * 共用字典裡**限定單曲**的條目,{ 正規化曲名: [{surface, reading}] }。
+ * 共用字典中限定單曲的條目,{ 正規化曲名: [{surface, reading}] }。
  *
- * 為什麼要分這一層:回報的人沒辦法判斷一筆修正在別的歌裡安不安全。
- * 「失 → な」在某首歌是對的,全域生效卻會讓失敗變成なはい。
- * 綁在一首歌上就不必判斷 —— 錯了也只錯那一首,而同一首歌的其他人
- * 直接拿到修好的結果,不必每個人再修一次。
+ * 需要這一層的原因:回報者無從判斷一筆修正在其他歌曲中是否安全。
+ * 「失 → な」在某首歌是正確的,全域生效卻會使失敗變成なはい。
+ * 綁在一首歌上則毋須判斷 —— 即使錯誤亦僅錯那一首,而同一首歌的其他使用者
+ * 可直接取得修正後的結果,不必逐一再修一次。
  */
 let sharedSongs = {};
 
-/** 現在在播哪一首(正規化過的曲名) */
+/** 目前播放中的曲目(已正規化的曲名) */
 let currentSong = '';
 
 function songEntries(title) {
@@ -77,19 +77,19 @@ function songEntries(title) {
 }
 
 /**
- * 把四層合成一份生效清單。
+ * 將四層合成一份生效清單。
  *
- * 優先順序:**使用者自己的 > 這首歌專屬的 > 共用通用的 > 內建的**
+ * 優先順序:使用者自訂 > 這首歌專屬 > 共用通用 > 內建
  *
- * 這首歌專屬的排在通用的前面,是因為它更具體:有人特地為這首歌回報,
- * 代表通用那筆在這首歌裡不對(或根本沒有)。具體的規則本來就該蓋過概括的。
+ * 這首歌專屬排在通用之前,是因為它更為具體:有人特地為這首歌回報,
+ * 即代表通用那一筆在這首歌中不正確(或根本沒有)。具體的規則本就應蓋過概括的。
  *
- * 為什麼使用者最大:他看得到自己那首歌的實際結果,而共用字典是為了
- * 「大多數情況」收的。萬一某個詞在他聽的歌裡是另一種讀法,
- * 他改完卻被共用的蓋回去,那個功能等於壞了。
+ * 使用者最優先的原因:他看得到自己那首歌的實際結果,而共用字典是為
+ * 「多數情況」收錄的。萬一某個詞在他所聽的歌中是另一種讀法,
+ * 他修改後卻被共用的覆蓋回去,該功能等同失效。
  *
- * 為什麼共用的排在內建前面:內建那份是隨擴充功能發布的,更新要等新版;
- * 共用那份改完幾小時內就到。同一個詞兩邊都有時,新的那份比較可能是修好的。
+ * 共用排在內建之前的原因:內建那份隨擴充功能發布,更新須等新版;
+ * 共用那份修改後數小時內即可送達。同一個詞兩邊皆有時,新的那份較可能是修好的。
  */
 function merge() {
   const song = songEntries(currentSong);
@@ -111,12 +111,12 @@ function merge() {
 }
 
 /**
- * 去要一份共用字典並套用。抓不到就維持現狀,不要清空。
+ * 索取一份共用字典並套用。取不到則維持現狀,不予清空。
  *
- * 呼叫端拿到 true 代表清單真的變了 —— 那時才需要重轉畫面上的歌詞,
- * 沒變的話重轉只是白白讓頁面卡一下。
+ * 呼叫端取得 true 代表清單確實變動 —— 屆時才需要重新轉換畫面上的歌詞,
+ * 未變動時重轉只會讓頁面白白卡頓一下。
  *
- * @returns {Promise<boolean>} 生效清單有沒有變動
+ * @returns {Promise<boolean>} 生效清單是否有變動
  */
 export async function loadSharedDictionary() {
   try {
@@ -125,7 +125,7 @@ export async function loadSharedDictionary() {
     const nextSongs = res?.songs && typeof res.songs === 'object' ? res.songs : {};
     if (!next.length && !Object.keys(nextSongs).length) return false;
 
-    // 內容一樣就什麼都不用做
+    // 內容相同即毋須任何處理
     const same =
       next.length === shared.length &&
       next.every((e, i) => e.surface === shared[i]?.surface && e.reading === shared[i]?.reading) &&
@@ -143,7 +143,7 @@ export async function loadSharedDictionary() {
   }
 }
 
-/** 兩份限定單曲的條目一不一樣。只比目前這首,其他首換了也不影響畫面。 */
+/** 兩份限定單曲的條目是否相同。僅比對目前這首,其他首變動不影響畫面。 */
 function sameSongs(a, b) {
   const left = a[currentSong] ?? [];
   const right = b[currentSong] ?? [];
@@ -154,12 +154,12 @@ function sameSongs(a, b) {
 }
 
 /**
- * 換歌了。回傳生效清單有沒有跟著變 —— 變了才需要重轉畫面上的歌詞。
+ * 切換曲目。回傳生效清單是否隨之變動 —— 變動了才需要重新轉換畫面上的歌詞。
  *
- * 沒有專屬條目的歌佔絕大多數,所以這裡幾乎都回 false;
- * 那正是重點:不要為了換歌就把每一行重轉一次,那會讓頁面卡一下。
+ * 沒有專屬條目的歌佔絕大多數,故此處幾乎都回傳 false;
+ * 那正是重點:不應為了換歌就將每一行重轉一次,那會使頁面卡頓。
  *
- * @param {string} title 曲名(原樣傳進來即可,正規化在裡面做)
+ * @param {string} title 曲名(原樣傳入即可,正規化在內部處理)
  * @returns {boolean}
  */
 export function setCurrentSong(title) {
@@ -170,7 +170,7 @@ export function setCurrentSong(title) {
   currentSong = next;
   const after = songEntries(next);
 
-  // 兩邊都沒有專屬條目,合併結果一定一樣,不必重算也不必通知
+  // 兩邊皆無專屬條目時合併結果必然相同,毋須重算亦毋須通知
   if (!before.length && !after.length) return false;
 
   merge();
@@ -178,7 +178,7 @@ export function setCurrentSong(title) {
   return true;
 }
 
-/** 這首歌有幾筆專屬條目。給畫面上提示用的。 */
+/** 這首歌的專屬條目筆數,供畫面提示使用。 */
 export function getSongCorrectionCount() {
   return songEntries(currentSong).length;
 }
@@ -193,7 +193,7 @@ function notify() {
   }
 }
 
-/** 從 storage 載入,並灌進 corrections.js 的生效清單 */
+/** 自 storage 載入,並灌入 corrections.js 的生效清單 */
 export async function loadUserCorrections() {
   try {
     const stored = await chrome.storage.sync.get(KEY);
@@ -222,7 +222,7 @@ async function persist(next) {
     return { ok: false, reason: 'write-failed' };
   }
 
-  // sync 空間有配額也可能同步失敗,本機再留一份保險
+  // sync 有配額限制且同步本身亦可能失敗,本機再留一份作為保險
   chrome.storage.local.set({ [`${KEY}.backup`]: payload }).catch(() => {});
 
   entries = next;
@@ -233,7 +233,7 @@ async function persist(next) {
 
 /**
  * 新增或覆寫一筆自訂讀音。
- * @param {string} surface 原文(要是完整的詞,不能只取其中一個字)
+ * @param {string} surface 原文(須為完整的詞,不可只取其中一個字)
  * @param {string} reading 假名讀音
  */
 export async function addUserCorrection(surface, reading) {
@@ -253,18 +253,18 @@ export function getUserCorrections() {
   return entries;
 }
 
-/** 訂閱變更(也包含其他分頁/其他裝置改的) */
+/** 訂閱變更(亦包含其他分頁或其他裝置所做的修改) */
 export function onCorrectionsChanged(callback) {
   listeners.add(callback);
   return () => listeners.delete(callback);
 }
 
 /**
- * 試算「如果加了這一筆會變成怎樣」,不寫進 storage。
+ * 試算「若加入這一筆會成為什麼結果」,不寫入 storage。
  *
- * popover 的即時預覽用這個 —— 使用者要靠它看出讀音有沒有涵蓋整個詞。
- * 只替換詞的一部分會破壞斷詞(例如把「怨子」的「怨」換掉會變成
- * 「えん子」→ e n ko),預覽會把這種錯誤直接顯示出來。
+ * popover 的即時預覽使用本函式 —— 使用者要靠它看出讀音是否涵蓋整個詞。
+ * 僅替換詞的一部分會破壞斷詞(例如將「怨子」的「怨」換掉會成為
+ * 「えん子」→ e n ko),預覽會將該類錯誤直接呈現出來。
  */
 export function previewCorrections(text, candidate) {
   const list = sortCorrections([
@@ -277,7 +277,7 @@ export function previewCorrections(text, candidate) {
   return applyCorrectionsWith(text, list);
 }
 
-// 其他分頁或其他裝置改了設定,這裡也要跟上
+// 其他分頁或其他裝置變更了設定時,此處亦須跟上
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'sync' || !changes[KEY]) return;
   const value = changes[KEY].newValue;
