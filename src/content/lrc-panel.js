@@ -45,6 +45,24 @@ const LINE_CLASS = 'romaji-lrc-line';
  */
 const USER_SCROLL_GRACE_MS = 4000;
 
+/**
+ * 自動捲動送出之後,這麼久之內的捲動事件都是它自己造成的。
+ *
+ * 平滑捲動會分散於多幀持續送出 scroll 事件,無法逐一辨認來源,
+ * 只能以時間窗涵蓋整段動畫。取值須大於實際動畫時間,寧可多涵蓋一點 ——
+ * 涵蓋不足會讓自動捲動把自己記成使用者操作,涵蓋過頭最多是短暫忽略
+ * 使用者在那半秒內的捲動。
+ */
+const AUTO_SCROLL_SETTLE_MS = 700;
+
+/**
+ * 尺寸停止變動這麼久,才算一次拉伸結束。
+ *
+ * ResizeObserver 在拖曳期間每一幀都會觸發,無從得知何時放手,
+ * 只能以「安靜了一段時間」推斷。
+ */
+const RESIZE_SETTLE_MS = 250;
+
 let panelEl = null;
 let bodyEl = null;
 let lineEls = [];
@@ -56,6 +74,15 @@ let curves = [];
 
 let lastActive = -1;
 let userScrolledAt = 0;
+/**
+ * 在這個時間點之前收到的捲動事件不算使用者操作。
+ *
+ * 有兩個來源會製造出「不是使用者捲的」捲動事件,而 scroll 事件本身
+ * 分辨不出來源:自動置中的平滑動畫,以及拉伸面板 —— 拉伸會改變字級
+ * (overlay.css 以 3.6cqw 讓字級跟著面板寬度走),字級一變內容總高就變,
+ * 瀏覽器隨即調整捲動位置。兩者都會被誤記為使用者操作而鎖住自動置中。
+ */
+let ignoreScrollUntil = 0;
 let onCloseCallback = null;
 
 /* -------------------------------------------------------------- 拖曳 */
@@ -168,13 +195,41 @@ window.addEventListener('resize', () => {
  * 不會發出任何可攔截的事件 —— 僅能觀察到「大小已變更」這一結果。
  */
 let sizeObserver = null;
+let resizeSettleTimer = null;
 function watchResize(panel) {
   sizeObserver?.disconnect();
   sizeObserver = new ResizeObserver(() => {
+    /*
+     * 拉伸期間瀏覽器調整出來的捲動不算使用者操作。
+     *
+     * 實測(2026-08):面板由 567px 拉到 782px,字級隨之由 20.4px 增至封頂的
+     * 26px,捲動位置被連帶調整 2306 → 2804,期間累計 17 次捲動事件。
+     * 字級一封頂,面板繼續變寬也不再有任何捲動事件 —— 因果很清楚。
+     * 不濾掉的話,這些事件會鎖住自動置中四秒。
+     */
+    ignoreScrollUntil = performance.now() + RESIZE_SETTLE_MS;
+
     // 拖曳期間不儲存:該時段位置每一幀皆在變動,待放開後儲存一次即可
     if (!dragging) saveLayout();
+
+    // 拉伸停止後立即置中一次,不等下一句
+    clearTimeout(resizeSettleTimer);
+    resizeSettleTimer = setTimeout(recenterAfterResize, RESIZE_SETTLE_MS);
   });
   sizeObserver.observe(panel);
+}
+
+/**
+ * 拉伸結束後把正在演唱的那一句拉回定位。
+ *
+ * 略過暫緩期間,因為版面是被拉伸改變的,不是使用者主動捲走的 ——
+ * 而且字級一變,他原本在看的位置本來就已經不在原處了,
+ * 讓他再等四秒加上一整句沒有任何道理。
+ */
+function recenterAfterResize() {
+  if (!panelEl || lastActive < 0) return;
+  const line = lineEls[lastActive];
+  if (line) scrollToActive(line, { force: true });
 }
 
 /** 還原上次拖曳後的位置與大小。未曾儲存則沿用 CSS 的預設值。 */
@@ -249,12 +304,13 @@ function buildShell(title, subtitle) {
   body.className = 'romaji-lrc-body';
 
   /*
-   * scroll 事件無法區分使用者捲動與程式捲動,因此自動捲動時會先將
-   * userScrolledAt 往回撥(見 scrollToActive),此處收到的便僅剩真正的使用者操作。
+   * scroll 事件無法區分來源,故由製造出捲動的那兩處(自動置中、拉伸面板)
+   * 事先標出時間窗,窗內的事件一律不記 —— 剩下的才是真正的使用者操作。
    */
   body.addEventListener(
     'scroll',
     () => {
+      if (performance.now() < ignoreScrollUntil) return;
       userScrolledAt = performance.now();
     },
     { passive: true }
@@ -349,6 +405,10 @@ export function closeLrcPanel() {
   sizeObserver?.disconnect();
   sizeObserver = null;
   clearTimeout(saveTimer);
+  // 面板都關了還去置中,會對著一個已經不存在的行操作
+  clearTimeout(resizeSettleTimer);
+  resizeSettleTimer = null;
+  ignoreScrollUntil = 0;
 
   panelEl?.remove();
   panelEl = null;
@@ -477,24 +537,28 @@ function countLetters(lineEl) {
  * 採偏上而非正中央:跟唱者需要看的是接下來幾句,
  * 已唱過的保留一兩行作為定位參考即已足夠。
  */
-function scrollToActive(lineEl) {
+function scrollToActive(lineEl, { force = false } = {}) {
   if (!bodyEl || !lineEl) return;
 
-  // 使用者方才自行捲動時暫不介入,待其停手一段時間後再接手
-  if (performance.now() - userScrolledAt < USER_SCROLL_GRACE_MS) return;
+  // 使用者方才自行捲動時暫不介入,待其停手一段時間後再接手。
+  // force 供拉伸結束後使用 —— 那不是使用者捲走的,見 recenterAfterResize。
+  if (!force && performance.now() - userScrolledAt < USER_SCROLL_GRACE_MS) return;
 
   const target = lineEl.offsetTop - bodyEl.clientHeight * 0.38;
   const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   /*
-   * 先將「使用者捲動」的時間戳往回撥,再自行捲動。
+   * 先標出時間窗,再自行捲動。
    *
-   * scroll 事件無法區分來源,若不作此處理,程式自身的每一次捲動
-   * 皆會被記為使用者操作,自動捲動便會在第一次之後永久停擺。
-   * 採往回撥而非設立旗標,是因為平滑捲動會分散於多幀送出事件,
-   * 旗標難以決定何時該解除。
+   * 平滑捲動會在接下來好幾幀持續送出 scroll 事件,而那些事件與使用者
+   * 捲動的長相完全相同。窗內的一律不記,自動置中才不會把自己記成
+   * 使用者操作而替自己鎖上四秒。
+   *
+   * 先前此處是把 userScrolledAt 往回撥,那個作法無效:它只讓「這一次」
+   * 通過檢查,擋不掉後續幾幀送出的事件,那些事件照樣把時間戳改回現在 ——
+   * 結果是每次置中都替自己鎖四秒,短於約 4.5 秒的句子永遠不會被置中。
    */
-  userScrolledAt = -USER_SCROLL_GRACE_MS;
+  ignoreScrollUntil = performance.now() + AUTO_SCROLL_SETTLE_MS;
 
   bodyEl.scrollTo({
     top: Math.max(0, target),
