@@ -33,7 +33,7 @@
     "改格式版本要同步改擴充功能的驗證;舊版會直接忽略認不得的版本。"
   ],
   "version": 1,
-  "updatedAt": "2026-08-23",
+  "updatedAt": "2026-08-25",
   "entries": [
     {
       "surface": "響めき",
@@ -139,6 +139,11 @@
       "surface": "怨親平等",
       "reading": "おんしんびょうどう",
       "note": "Kaikai Kitan — 怨親平等に没個性"
+    },
+    {
+      "surface": "春夏秋冬",
+      "reading": "はるなつあきふゆ",
+      "note": "春夏秋冬 — 春夏秋冬"
     }
   ],
   "songs": [
