@@ -56,6 +56,7 @@ import {
   getPanelLineElements,
   updateLrcPanel,
   ensurePanelAttached,
+  seekFromPanelClick,
 } from './lrc-panel.js';
 import {
   DEFAULTS,
@@ -526,7 +527,6 @@ async function onRomajiClick(event) {
   if (handleOutsideClick(event.target)) return;
 
   const overlay = event.target?.closest?.('.romaji-overlay');
-  if (!overlay) return;
 
   /*
    * 點到「未轉出的字」→ 開啟修正面板,而非插入空格。
@@ -548,6 +548,25 @@ async function onRomajiClick(event) {
     });
     return;
   }
+
+  /*
+   * LRCLIB 面板:點一句即跳至該句的播放位置。
+   *
+   * 位置在此有兩個理由。排在補讀音之後 —— 紅色底線的字是明確標記過的
+   * 目標,點它是要補讀音,跳走屬於誤觸。排在放游標之前 —— 面板上
+   * 「重聽這一句」遠比手動切分常用,而兩者搶的是同一個動作;
+   * 切分仍可經由 Tab 聚焦進入編輯模式(onRomajiFocusIn 已支援)。
+   *
+   * 這一段必須位於下方的 overlay 檢查之前:點在行的留白處(不在拼音上)
+   * 同樣要跳,而那時 overlay 為 null。
+   */
+  if (seekFromPanelClick(event.target)) {
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
+
+  if (!overlay) return;
 
   /*
    * 平假名模式不接受手動切分 —— 理由見 processLyricsLine 中的說明
