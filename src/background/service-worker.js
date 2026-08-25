@@ -1,48 +1,46 @@
 /**
  * background/service-worker.js
- * 由 legacy/lyrics-fallback.js 改寫。
+ * 歌詞與共用字典的網路存取層,由 legacy/lyrics-fallback.js 改寫。
  *
- * 為什麼放在 service worker(README 限制 #3):
+ * 置於 service worker 的理由(README 限制 #3):
  * - 不受 Spotify 頁面 CSP 的 connect-src 限制
- * - 所有分頁共用同一份快取,不會每開一個分頁就重打一次 API
- * - 併發請求可以在這裡去重
+ * - 所有分頁共用同一份快取,不致每開一個分頁便重新請求一次 API
+ * - 併發請求可在此處去重
  */
 
 /*
- * 借用 content script 那邊的日文判定。
+ * 日文判定沿用 content script 的實作。
  *
- * 為什麼不在這裡自己寫一個「有沒有日文」的判斷:那件事已經有一套了,
- * 而且涵蓋的範圍比隨手寫的正規表達式廣得多(疊字符、半形片假名、
- * 擴充漢字區)。同一個問題寫兩份答案,遲早會有一邊改了另一邊沒改 ——
- * 這個專案已經在「長音符」跟「曲目長度」上各踩過一次了。
+ * 不於此另寫一份正規表達式:cjk.js 涵蓋的範圍廣得多(疊字符、半形片假名、
+ * 擴充漢字區),同一項判斷若存在兩份實作,終將出現一邊修改而另一邊未同步的情形
+ * —— 本專案已於「長音符」與「曲目長度」各發生過一次。
  *
- * cjk.js 不 import 任何東西、也不碰畫面或擴充功能的介面,
- * 所以背景程式可以安心引用。
+ * cjk.js 不 import 任何模組,亦不觸及畫面與擴充功能介面,背景程式可安全引用。
  */
 import { hasJapanese } from '../content/cjk.js';
 import { parseSharedDictionary } from '../shared/shared-dictionary.js';
 
 const LRCLIB_ENDPOINT = 'https://lrclib.net/api/search';
 /*
- * LRCLIB 要求標明來源,好在出問題時能聯絡開發者。
+ * LRCLIB 要求請求標明來源,以便在異常時聯絡開發者。
  *
- * 這個值由 build.mjs 從 package.json 注入(名稱 / 版本 / 專案網址),
- * 這裡刻意不寫死 —— 先前寫死的那份填的是不存在的網址(github.com/local/…),
- * 等於規避了那個要求;而且版本號也不會跟著 package.json 走,遲早對不上。
+ * 此值由 build.mjs 自 package.json 注入(名稱 / 版本 / 專案網址),不寫死於程式中:
+ * 先前寫死的那份填的是不存在的網址(github.com/local/…),形同規避該項要求,
+ * 且版本號無法跟隨 package.json 更新。
  *
- * 萬一沒被注入(例如有人直接用 Node 跑這支檔案),退回一個誠實的標示,
- * 不要假裝成某個不存在的專案。
+ * 未被注入時(例如直接以 Node 執行本檔)退回一個據實標示的字串,
+ * 不冒用不存在的專案。
  */
 const CLIENT_HEADER =
   typeof __LRCLIB_CLIENT__ === 'string' ? __LRCLIB_CLIENT__ : 'romaji-lyrics-extension (unbundled)';
 const CACHE_PREFIX = 'lrclib:';
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 天
 const FETCH_TIMEOUT_MS = 10_000; // 單次 LRCLIB 請求上限
-const RESPONSE_TIMEOUT_MS = 15_000; // 訊息通道保險絲,要比 FETCH_TIMEOUT_MS 長
+const RESPONSE_TIMEOUT_MS = 15_000; // 訊息通道保險絲,須大於 FETCH_TIMEOUT_MS
 
 const LOG = '[romaji/bg]';
 
-/** 同一首歌同時被問多次時共用同一個 Promise */
+/** 同一首歌同時發出多次請求時共用同一個 Promise */
 const inFlight = new Map();
 
 function cacheKey(trackName, artistName) {
@@ -50,28 +48,27 @@ function cacheKey(trackName, artistName) {
 }
 
 /**
- * 快取格式版本。認不得的版本一律當成 miss 重抓,自我修復。
+ * 快取格式版本。無法辨識的版本一律視為 miss 並重新取得,具自我修復性。
  *
- * v2 → v3:多存了 pickedFor(挑這筆時用的曲目長度)。
- * 推進版本號同時也是**修復手段** —— v2 的資料可能是在沒有長度的情況下
- * 挑出來的錯版本(見下方 readCache 的說明),推進版本號會讓那些
- * 已經存錯的資料自動作廢重抓,使用者不必手動清。
+ * v2 → v3:增加 pickedFor(挑選該筆時所用的曲目長度)。
+ * 推進版本號同時亦是修復手段 —— v2 的資料可能是在沒有長度資訊的情況下
+ * 挑出的錯誤版本(見下方 readCache 的說明),推進版本號可使已存入的錯誤資料
+ * 自動作廢重抓,毋須使用者手動清除。
  */
 const CACHE_VERSION = 3;
 
 /**
- * 讀快取。除了版本與過期,還要確認「這筆是不是用同一個長度挑出來的」。
+ * 讀取快取。除版本與有效期外,尚須確認該筆是否以相同的曲目長度挑選而得。
  *
- * 為什麼長度要納入判斷:同一首歌在 LRCLIB 常有好幾個版本
- * (單曲版、專輯版、Live),長度差很多、時間軸完全不通用。
- * requestLrclib 是拿曲目長度去篩掉不是同一個版本的,
- * 所以「用長度 245 挑出來的」跟「完全沒篩就挑的」是兩個不同的答案,
- * 不能共用同一格。
+ * 長度須納入判斷的原因:同一首歌在 LRCLIB 常有數個版本(單曲版、專輯版、Live),
+ * 長度差異大且時間軸完全不通用。requestLrclib 以曲目長度篩除非同一版本的結果,
+ * 因此「以長度 245 挑出的結果」與「未經篩選挑出的結果」是兩個不同的答案,
+ * 不可共用同一格快取。
  *
- * 三種情況:
- * - 呼叫端沒給長度 → 它沒有偏好,存的是什麼都收
- * - 給了長度且跟當初一致 → 命中
- * - 給了長度但當初不是用它挑的 → 當成沒有,重抓一次挑對版本
+ * 三種情形:
+ * - 呼叫端未提供長度 → 無偏好,任何已存內容皆可接受
+ * - 提供長度且與當初一致 → 命中
+ * - 提供長度但當初非以其挑選 → 視為未命中,重新取得以挑出正確版本
  */
 async function readCache(key, durationSec) {
   const stored = await chrome.storage.local.get(key);
@@ -95,14 +92,14 @@ async function writeCache(key, payload, durationSec) {
 }
 
 /**
- * 這一筆歌詞有多少比例的行含日文(0~1)。
+ * 該筆歌詞中含日文的行數比例(0~1)。
  *
- * 用「行」而不是「字」當單位,是因為要分辨的正是**對照版**:
- * 它的日文一句不少,只是每句後面多插了一句翻譯。
- * 按字數算的話兩者差距會被沖淡;按行算則是乾淨的 54% 對 95%。
+ * 以「行」而非「字」為單位,是因為所要分辨的正是對照版:
+ * 其日文一句不少,僅在每句後方插入一句翻譯。按字數計算會沖淡兩者的差距,
+ * 按行計算則為 54% 對 95% 的明確差異。
  *
- * 開頭那幾行製作資訊(作詞、作曲)也算進去 —— 它們含歌手名的漢字,
- * 兩種版本都有,對比較結果沒有影響,不值得為它們多寫一段排除邏輯。
+ * 開頭數行製作資訊(作詞、作曲)一併計入 —— 其中含歌手名的漢字,
+ * 兩種版本皆有,對比較結果無影響,不值得為此另寫排除邏輯。
  */
 function japaneseRatio(entry) {
   const text = entry?.syncedLyrics || entry?.plainLyrics || '';
@@ -112,33 +109,34 @@ function japaneseRatio(entry) {
 }
 
 /**
- * 用歌名 + 歌手名向 LRCLIB 搜尋歌詞。
- * @returns {Promise<string[]|null>} 逐行的純文字歌詞,找不到回 null
+ * 以歌名與歌手名向 LRCLIB 搜尋歌詞。
+ * @returns {Promise<{lines: string[]|null, synced: string|null}|null>}
+ *          挑選後的最佳結果;查無結果或請求失敗時回傳 null
  */
 async function requestLrclib(trackName, artistName, durationSec) {
   const url = `${LRCLIB_ENDPOINT}?track_name=${encodeURIComponent(trackName)}&artist_name=${encodeURIComponent(artistName)}`;
 
-  // 沒有逾時的 fetch 可能一直卡著,讓 service worker 被回收時
-  // 訊息通道無聲關閉(就是 "message channel closed" 那個警告的來源之一)
+  // 未設逾時的 fetch 可能持續等待,導致 service worker 遭回收時
+  // 訊息通道無聲關閉(即 "message channel closed" 警告的來源之一)
   const controller = new AbortController();
   const abortTimer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
   try {
     const res = await fetch(url, {
-      // LRCLIB 官方建議帶自訂 client 標頭表明身份
+      // LRCLIB 官方建議以自訂 client 標頭標明身分
       headers: { 'Lrclib-Client': CLIENT_HEADER },
       signal: controller.signal,
     });
 
     if (!res.ok) {
-      // 用 Node 測試時這裡會拿到 403 + HTML(Cloudflare 擋自動化流量)。
-      // 從 Chrome 擴充功能發出的請求帶的是真正的瀏覽器指紋,預期不會被擋。
+      // 以 Node 測試時此處會取得 403 與 HTML 內容(Cloudflare 阻擋自動化流量)。
+      // 由 Chrome 擴充功能發出的請求帶有真實瀏覽器指紋,預期不會被阻擋。
       const hint = res.status === 403 ? '(可能被 Cloudflare 擋下)' : '';
       console.warn(`${LOG} LRCLIB 查詢失敗,狀態碼: ${res.status} ${hint}`);
       return null;
     }
 
-    // 被擋下時可能回 200 + 挑戰頁面,先確認真的是 JSON 再解析
+    // 遭阻擋時可能回應 200 與挑戰頁面,故先確認內容型別確為 JSON 再解析
     const contentType = res.headers.get('content-type') || '';
     if (!contentType.includes('json')) {
       console.warn(`${LOG} LRCLIB 回傳的不是 JSON(content-type: ${contentType}),可能是 Cloudflare 挑戰頁`);
@@ -151,32 +149,31 @@ async function requestLrclib(trackName, artistName, durationSec) {
     const usable = results.filter((r) => r?.plainLyrics || r?.syncedLyrics);
     if (!usable.length) return null;
 
-    // 同一首歌常有多個版本(單曲版、專輯版、Live),長度差很多的話
-    // 時間軸會整個對不上。先用歌曲長度篩掉明顯不是同一個版本的。
+    // 同一首歌常有多個版本(單曲版、專輯版、Live),長度差異大者時間軸完全對不上。
+    // 先以歌曲長度篩除明顯不屬同一版本的結果。
     const sameLength = durationSec
       ? usable.filter((r) => Math.abs((r.duration ?? 0) - durationSec) <= 3)
       : [];
     const pool = sameLength.length ? sameLength : usable;
 
     /*
-     * 剩下的用兩個條件排序,挑最好的那一筆。
+     * 其餘結果依兩項條件排序,取最佳者。
      *
-     * 1. 有時間軸的優先 —— 那才做得到逐句同步,價值最高
-     * 2. 同樣有時間軸時,挑日文比例最高的
+     * 1. 有時間軸者優先 —— 逐句同步僅在具備時間軸時成立,價值最高
+     * 2. 同樣有時間軸時,取日文比例最高者
      *
-     * 第 2 點是實測出來的(Lemon,LRCLIB 回了 20 筆):
-     * 那些內容是大家上傳的,同一首歌會混著「純日文版」跟
-     * 「日文+外語對照版」。對照版每一句都寫兩遍、時間標一模一樣,
-     * 日文只佔 54%;純日文版是 95%。
+     * 第 2 點源自實測(Lemon,LRCLIB 回傳 20 筆):
+     * 內容由使用者上傳,同一首歌會混雜「純日文版」與「日文 + 外語對照版」。
+     * 對照版每句寫兩遍且時間標記相同,日文僅佔 54%;純日文版為 95%。
      *
-     * 挑到對照版的後果:歌詞面板會每句印兩遍,而且因為兩行的時間相同、
-     * activeIndexAt 取的是最後一個符合的,高亮會停在翻譯那一行。
+     * 挑到對照版的後果:歌詞面板每句印兩遍,且因兩行時間相同、
+     * activeIndexAt 取的是最後一個符合者,高亮會停在翻譯那一行。
      *
-     * 為什麼是「比例最高」而不是「必須有日文」:
-     * 使用者也聽中文、英文歌,那些本來就沒有日文。用硬性條件會讓那些歌
-     * 從「有歌詞」變成「完全沒歌詞」—— 為了修一個情況弄壞另一個。
-     * 改成排序就沒有這個問題:全部都不是日文時,大家分數一樣,
-     * 順序不變,行為跟改動前完全相同。
+     * 採「比例最高」而非「必須含日文」的原因:
+     * 使用者亦聽中文與英文歌,該類歌曲本就不含日文。硬性條件會使其
+     * 由「有歌詞」變為「完全沒有歌詞」,等於為修正一種情況而破壞另一種。
+     * 改以排序則無此問題:全數不含日文時分數相同,順序不變,
+     * 行為與改動前完全一致。
      */
     const best = [...pool].sort(
       (a, b) =>
@@ -203,10 +200,10 @@ async function requestLrclib(trackName, artistName, durationSec) {
 }
 
 /**
- * 對外的主要入口:先看快取,沒有才打 API。
- * 也掛在 globalThis 上,方便在 service worker 的 DevTools 手動測試:
+ * 對外主要入口:先查快取,未命中才呼叫 API。
+ * 同時掛於 globalThis,便於在 service worker 的 DevTools 手動測試:
  *   await fetchLyrics('曲名', '歌手名')
- * @returns {Promise<{lines: string[]|null, cached: boolean}>}
+ * @returns {Promise<{lines: string[]|null, synced: string|null, cached: boolean}>}
  */
 async function fetchLyrics(trackName, artistName, durationSec) {
   if (!trackName || !artistName) return { lines: null, synced: null, cached: false };
@@ -219,7 +216,7 @@ async function fetchLyrics(trackName, artistName, durationSec) {
     return { ...cached, cached: true };
   }
 
-  // 同時進來的兩個請求若帶著不同的長度,答案也會不同,不能共用同一個 Promise
+  // 同時進入的兩個請求若帶有不同的長度,結果亦不同,不可共用同一個 Promise
   const flightKey = `${key}|${durationSec ?? ''}`;
   if (inFlight.has(flightKey)) return inFlight.get(flightKey);
 
@@ -236,44 +233,43 @@ async function fetchLyrics(trackName, artistName, durationSec) {
 
 globalThis.fetchLyrics = fetchLyrics;
 
-/* ------------------------------------------------- 大家共用的讀音字典 */
+/* ------------------------------------------------------- 共用讀音字典 */
 
 /*
- * 字典放在 GitHub 上一個公開檔案,擴充功能定期來抓。
+ * 字典置於 GitHub 上的一個公開檔案,由擴充功能定期取得。
  *
- * 為什麼是這個做法而不是自己架伺服器:
- * - 不用花錢、不用維護,GitHub 幫忙放
- * - 只有維護者能改,所以**品質仍然有人把關** —— 這很重要,
- *   錯的讀音會讓畫面很有自信地顯示錯的拼音,那比轉不出來更糟
- * - 改完不必發新版,合併後幾小時內所有人都拿得到
- * - 只有 GET、不送出任何資料,「這個擴充功能沒有伺服器」的說法仍然成立
+ * 採此作法而非自建伺服器的理由:
+ * - 無需費用與維運,由 GitHub 代管
+ * - 僅維護者可修改,品質仍有人把關 —— 此點至關重要,
+ *   錯誤的讀音會使畫面以確信的樣態顯示錯誤的拼音,較轉換失敗更難察覺
+ * - 修改後毋須發布新版,合併後數小時內所有使用者皆可取得
+ * - 僅有 GET、不送出任何資料,「本擴充功能沒有伺服器」的敘述仍然成立
  */
 const DICTIONARY_URL =
   'https://raw.githubusercontent.com/psgo555/romaji-lyrics-extension/master/dictionary.json';
 const DICTIONARY_KEY = 'sharedDictionary';
 const DICTIONARY_TTL_MS = 12 * 60 * 60 * 1000; // 12 小時
-// 2:多了限定單曲的條目(songs)。舊快取沒有那一欄,換號碼強迫重抓一次。
+// 2:新增限定單曲的條目(songs)。舊快取無該欄位,推進版本號以強制重新取得。
 const DICTIONARY_CACHE_VERSION = 2;
 
 /*
- * 安裝、更新、或(開發時)按下「重新載入擴充功能」都會把快取丟掉,
- * 下一次就會重新抓一份。
+ * 安裝、更新,以及開發時按下「重新載入擴充功能」皆會清除快取,下一次即重新取得。
  *
- * 為什麼需要:12 小時的快取對一般使用者剛好,但對**剛改完字典的人**
- * 完全不合直覺 —— 他改了檔案、重新載入了擴充功能,畫面卻沒變,
- * 而且沒有任何跡象告訴他是快取的關係。實際踩過這一次。
+ * 必要性:12 小時的快取對一般使用者合宜,但對剛修改完字典的人完全不合直覺 ——
+ * 檔案已改、擴充功能已重新載入,畫面卻沒有變化,且無任何跡象指向快取。
+ * 此情形已實際發生過一次。
  *
- * 重新載入本來就是「我要看最新狀態」的意思,快取不該活過那個動作。
+ * 重新載入本身即代表「要看到最新狀態」,快取不應存續於該動作之後。
  */
 chrome.runtime.onInstalled.addListener(() => {
   chrome.storage.local.remove(DICTIONARY_KEY).catch(() => {});
 });
 
 /**
- * 取得共用字典。先看快取,過期才連網。
+ * 取得共用字典。先查快取,過期才連網。
  *
- * 任何一步失敗都回空陣列而不是丟例外 —— 抓不到字典只代表少了幾個新詞,
- * 內建那份還在,不該讓整個轉換流程跟著壞掉。
+ * 任何一步失敗皆回傳空陣列而非拋出例外 —— 取不到字典僅代表少了若干新詞,
+ * 內建字典仍在,不應使整個轉換流程一併失效。
  */
 async function fetchSharedDictionary() {
   const stored = await chrome.storage.local.get(DICTIONARY_KEY);
@@ -290,7 +286,7 @@ async function fetchSharedDictionary() {
     const res = await fetch(DICTIONARY_URL, { cache: 'no-cache' });
     if (!res.ok) {
       console.warn(`${LOG} 共用字典下載失敗,狀態碼 ${res.status}`);
-      return fromCache(cached); // 過期的也比沒有好
+      return fromCache(cached); // 過期的資料仍優於全無
     }
 
     const { entries, songs, skipped } = parseSharedDictionary(await res.json());
@@ -299,10 +295,10 @@ async function fetchSharedDictionary() {
     }
 
     /*
-     * 驗完是空的就**不要覆蓋快取**。
+     * 驗證後為空時不覆蓋快取。
      *
-     * 那代表檔案壞了或格式換了。這時把空的存進去,等於把使用者原本
-     * 還能用的那份也一起清掉 —— 一個人手滑改壞檔案,所有人的字典就空了。
+     * 該情形代表檔案損壞或格式變更。此時寫入空資料等同於一併清除使用者
+     * 原本仍可使用的那一份 —— 一人誤改檔案,所有使用者的字典即為空。
      */
     const songCount = Object.keys(songs).length;
     if (!entries.length && !songCount) {
@@ -322,11 +318,11 @@ async function fetchSharedDictionary() {
 }
 
 /**
- * 把快取整理成回應的形狀。
+ * 將快取整理成回應的形狀。
  *
- * 抽出來是因為「抓不到就沿用舊的」在上面出現四次,而每一處都要記得
- * 同時帶上 entries 與 songs —— 漏一個的症狀是限定單曲的修正在
- * 「這次沒連上網」的時候悄悄失效,不會有任何錯誤訊息。
+ * 抽出的原因:「取不到即沿用舊資料」在上方出現四處,而每一處都須同時帶上
+ * entries 與 songs —— 遺漏其一的症狀是限定單曲的修正在未連上網時無聲失效,
+ * 不會產生任何錯誤訊息。
  */
 function fromCache(cached) {
   return { entries: cached?.entries ?? [], songs: cached?.songs ?? {}, cached: true };
@@ -346,12 +342,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 });
 
 function handleLyricsMessage(message, sendResponse) {
-  // 不是我們的訊息就回 false,把通道讓給其他 listener,不要佔著不回應
+  // 非本模組的訊息回傳 false,將通道讓予其他 listener,不佔用而不回應
   if (message?.type !== 'FETCH_LYRICS') return false;
 
-  // 回應剛好一次。
-  // 少回應 → console 會出現「message channel closed before a response was received」;
-  // 多回應 → 第二次呼叫 sendResponse 會丟例外。
+  // 回應恰好一次。
+  // 少回應 → console 出現 "message channel closed before a response was received";
+  // 多回應 → 第二次呼叫 sendResponse 會拋出例外。
   let answered = false;
   const respond = (payload) => {
     if (answered) return;
@@ -359,13 +355,13 @@ function handleLyricsMessage(message, sendResponse) {
     try {
       sendResponse(payload);
     } catch (err) {
-      // 發送端(分頁)可能已經關閉或重新整理,這時回應失敗是正常的
+      // 發送端(分頁)可能已關閉或重新整理,此時回應失敗屬正常情形
       console.warn(`${LOG} 回應訊息失敗,發送端可能已關閉:`, err);
     }
   };
 
-  // 保險絲:service worker 有存活上限,萬一 fetch 卡住,
-  // 通道會無聲關閉並在 content script 端噴警告。寧可先回一個明確的逾時結果。
+  // 保險絲:service worker 有存活上限,若 fetch 卡住,通道會無聲關閉
+  // 並於 content script 端產生警告。此處寧可先回傳一個明確的逾時結果。
   const fuse = setTimeout(() => {
     console.warn(`${LOG} FETCH_LYRICS 逾時,先回空結果`);
     respond({ lines: null, synced: null, cached: false, timedOut: true });
@@ -379,5 +375,5 @@ function handleLyricsMessage(message, sendResponse) {
     })
     .finally(() => clearTimeout(fuse));
 
-  return true; // 保持非同步回應通道開著
+  return true; // 維持非同步回應通道
 }
