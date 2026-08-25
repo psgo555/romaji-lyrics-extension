@@ -26,20 +26,19 @@
  *    否則 `if (x) {` 的條件式內容會被當成參數而列入白名單,
  *    任何在 if 條件中出現過的名稱都會被消音。
  *
- * 3. 正規表達式字面值 —— 尚未修正,目前確實漏掉一整支模組。
- *    stripNoise 逐字元掃描時不認得 /…/ 這種字面值,因此其中的引號與
- *    反引號會被當成字串的開頭。sync-highlight.js 的標點正規表達式
- *    內含一個反引號,而該檔全檔僅此一個,配不到結尾,
- *    於是自該行起直到檔尾全部被抹成空白。
+ * 3. 正規表達式字面值(2026-08-25 已修正,但仍是最脆弱的一環)。
+ *    stripNoise 原本不認得 /…/ 這種字面值,因此其中的引號與反引號會被
+ *    當成字串的開頭。sync-highlight.js 的標點正規表達式內含一個反引號,
+ *    而該檔全檔僅此一個,配不到結尾,於是自該行起直到檔尾全部被抹成空白 ——
+ *    該檔的 7 個 export 對掃描器完全隱形(跨模組 export 名稱數 102,
+ *    修正後為 109),任何模組用到 alignLrc、activeIndexAt、paintSweep
+ *    而忘記 import,本工具都不會回報。
  *
- *    後果經實測確認:該檔的 7 個 export 對掃描器完全隱形(跨模組
- *    export 名稱數 102,修正後為 109),因此任何模組用到 alignLrc、
- *    activeIndexAt、paintSweep 等而忘記 import,本工具都不會回報。
- *    實測方式即上述驗證法:移除 lrc-panel.js 對 sync-highlight 的 import,
- *    現況回報「乾淨」;把該反引號改成等效的十六進位跳脫之後,五處全部抓到。
- *
- *    修正方向是讓 stripNoise 認得正規表達式字面值(依前一個非空白字元
- *    判斷 / 是除號或字面值的開頭),或退一步禁止在原始碼中直接寫出反引號。
+ *    現行作法是以 prevIsValue 分辨 `/` 是除號或字面值的開頭。這個判斷
+ *    先天是啟發式的,改動 stripNoise 時務必重跑上述驗證法:
+ *    移除 lrc-panel.js 對 sync-highlight 的 import,確認五處都被抓到;
+ *    同時確認未改動的副本仍回報乾淨(沒有誤報),且 export 名稱數仍是 109
+ *    —— 數字掉下來就代表又有某支模組被整片抹掉了。
  */
 
 import { readdirSync, readFileSync, statSync } from 'node:fs';
@@ -62,10 +61,51 @@ function walk(dir) {
 /* ------------------------------------- 去除註解與字串(避免誤判) */
 
 /**
- * 將註解、字串、樣板字串的內容替換為空白。
+ * 這些關鍵字後面的 `/` 一定是正規表達式的開頭,不可能是除號。
+ * 其餘情況則看前一個 token 有沒有產生值(見 stripNoise 的 prevIsValue)。
+ */
+const KEYWORDS_BEFORE_REGEX = new Set([
+  'return', 'typeof', 'case', 'in', 'of', 'new', 'delete', 'void',
+  'instanceof', 'do', 'else', 'yield', 'await', 'throw',
+]);
+
+/**
+ * 自 start 這個 `/` 起,找出正規表達式字面值的結尾 `/`。
+ *
+ * 字元類別 `[...]` 內的 `/` 不算結尾(`/[a-z/]/` 是合法的),故須分開追蹤。
+ * 找不到結尾、或先遇到換行,即回傳 -1 —— 那代表它其實是除號,不可當字面值處理。
+ *
+ * @returns {number} 結尾 `/` 的位置;並非字面值時回傳 -1
+ */
+function scanRegexLiteral(src, start, n) {
+  let inClass = false;
+  for (let j = start + 1; j < n; j += 1) {
+    const ch = src[j];
+    if (ch === '\\') {
+      j += 1; // 跳過被跳脫的那個字元
+      continue;
+    }
+    if (ch === '\n') return -1;
+    if (inClass) {
+      if (ch === ']') inClass = false;
+      continue;
+    }
+    if (ch === '[') {
+      inClass = true;
+      continue;
+    }
+    if (ch === '/') return j;
+  }
+  return -1;
+}
+
+/**
+ * 將註解、字串、樣板字串、正規表達式字面值的內容替換為空白。
  * 長度保持不變,行號才不會偏移。樣板字串的 ${} 內是真正的程式碼,須保留。
  *
- * 注意:不認得正規表達式字面值,詳見檔頭第 3 個坑。
+ * 正規表達式一定要認得,否則其中的引號與反引號會被當成字串的開頭 ——
+ * 那會使自該處起至檔尾整片被誤判為字串而抹去,掃描器對整支模組完全失明。
+ * 這正是先前 sync-highlight.js 所發生的事,詳見檔頭第 3 個坑。
  */
 function stripNoise(src) {
   const out = Array.from(src);
@@ -75,6 +115,15 @@ function stripNoise(src) {
   const blank = (from, to) => {
     for (let k = from; k < to; k++) if (out[k] !== '\n') out[k] = ' ';
   };
+
+  /*
+   * 前一個有意義的 token 是否產生值。
+   *
+   * 這是分辨 `a / b`(除號)與 `/abc/`(字面值)唯一可靠的依據:
+   * 除號之前必定是一個值(識別字、數字、`)`、`]`、字串),
+   * 而字面值之前必定不是(`(`、`,`、`=`、`return` 等等)。
+   */
+  let prevIsValue = false;
 
   while (i < n) {
     const c = src[i];
@@ -104,6 +153,7 @@ function stripNoise(src) {
         j++;
       }
       blank(i + 1, j);
+      prevIsValue = true;
       i = j + 1;
       continue;
     }
@@ -127,8 +177,36 @@ function stripNoise(src) {
         out[j] = out[j] === '\n' ? '\n' : ' ';
         j++;
       }
+      prevIsValue = true;
       i = j + 1;
       continue;
+    }
+    /*
+     * 正規表達式字面值。此處的 `/` 已經確定不是註解(上面兩個分支先攔),
+     * 所以只剩「除號」與「字面值」兩種可能,由 prevIsValue 分辨。
+     * 兩側的 `/` 與旗標留著不動,只把內容抹掉 —— 那裡面沒有真正的識別字。
+     */
+    if (c === '/' && !prevIsValue) {
+      const end = scanRegexLiteral(src, i, n);
+      if (end > 0) {
+        blank(i + 1, end);
+        i = end + 1;
+        while (i < n && /[a-z]/i.test(src[i])) i += 1; // 略過 g / i / m 這些旗標
+        prevIsValue = true;
+        continue;
+      }
+      // 找不到結尾就當它是除號,照一般字元往下走
+    }
+    if (!/\s/.test(c)) {
+      if (/[\w$]/.test(c)) {
+        // 整個識別字一起看:關鍵字後面的 `/` 是字面值,其餘(變數、數字)是除號
+        let j = i;
+        while (j < n && /[\w$]/.test(src[j])) j += 1;
+        prevIsValue = !KEYWORDS_BEFORE_REGEX.has(src.slice(i, j));
+        i = j;
+        continue;
+      }
+      prevIsValue = c === ')' || c === ']';
     }
     i++;
   }
