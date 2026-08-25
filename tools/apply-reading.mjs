@@ -1,23 +1,23 @@
 #!/usr/bin/env node
 /**
  * apply-reading.mjs
- * 把一則「補讀音」issue 的內容加進 dictionary.json。
+ * 將一則「補讀音」issue 的內容加入 dictionary.json。
  *
- * ── 這支存在的理由 ────────────────────────────────────────────
- * 回報進來之後,維護者要做的判斷只有一個:**這筆對不對、要收在哪一層**。
- * 那件事機器做不了。但「打開檔案、找到正確位置、貼上、別漏逗號、
- * 更新日期、commit」全部都是機器該做的 —— 而且是人最容易出錯的地方:
- * JSON 少一個逗號,整份字典就壞掉,所有使用者一起受影響。
+ * ── 本工具存在的理由 ──────────────────────────────────────────
+ * 回報進來之後,維護者要做的判斷只有一項:這一筆是否正確、應收在哪一層。
+ * 那件事機器做不到。但「開啟檔案、找到正確位置、貼上、勿漏逗號、
+ * 更新日期、commit」全屬機器應做之事 —— 且是人最容易出錯之處:
+ * JSON 少一個逗號,整份字典即損壞,所有使用者一併受影響。
  *
- * 所以把關的那一步留給人(貼 approved 標籤),手工的部分交給這支。
+ * 故把關那一步留給人(貼上 approved 標籤),手工的部分交由本工具。
  *
- * ── 為什麼要用擴充功能自己的驗證器 ────────────────────────────
- * 因為「能不能寫進檔案」跟「使用者的瀏覽器會不會採用」必須是同一個標準。
- * 各寫一份的話,會出現「機器人說收好了、實際上所有人都拿不到」這種
- * 完全不會報錯的失敗 —— 而且要等到有人抱怨才會發現。
+ * ── 使用擴充功能自身驗證器的原因 ──────────────────────────────
+ * 因為「能否寫入檔案」與「使用者的瀏覽器是否會採用」必須是同一個標準。
+ * 各寫一份的話,會出現「機器人回報已收錄、實際上所有人都取不到」這種
+ * 完全不會報錯的失敗 —— 且須等到有人抱怨才會發現。
  *
- * 做法是:改好之後把整份丟回 parseSharedDictionary 跑一次,
- * 確認**新加的那一筆真的活下來**,活不下來就不寫檔。
+ * 作法是:修改完成後將整份丟回 parseSharedDictionary 執行一次,
+ * 確認新加入的那一筆確實存活,未能存活即不寫檔。
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -28,11 +28,11 @@ import { parseSharedDictionary, normalizeSongTitle } from '../src/shared/shared-
 const DICTIONARY_PATH = new URL('../dictionary.json', import.meta.url);
 
 /**
- * 從 issue 內文裡把欄位挖出來。
+ * 自 issue 內文中取出各欄位。
  *
- * 內文是擴充功能自動填的,格式固定 —— 這是這件事做得成的前提。
- * 但仍然寫得寬鬆一點(全形/半形冒號、前後空白、包不包反引號都吃),
- * 因為使用者送出前可以編輯,而多打一個空格不該讓整條路失敗。
+ * 內文由擴充功能自動填入,格式固定 —— 這是本流程得以成立的前提。
+ * 但仍寫得寬鬆(全形與半形冒號、前後空白、有無反引號皆可接受),
+ * 因為使用者於送出前可以編輯,而多打一個空格不應使整條流程失敗。
  *
  * @param {string} body issue 的內文
  * @returns {{song: string, surface: string, reading: string, line: string}}
@@ -41,14 +41,14 @@ export function parseIssueBody(body) {
   const pick = (label) => {
     const match = new RegExp(`^-\\s*${label}\\s*[:：]\\s*(.+?)\\s*$`, 'm').exec(body ?? '');
     if (!match) return '';
-    // 反引號是排版用的,不是內容的一部分
+    // 反引號屬排版用途,不是內容的一部分
     return match[1].replace(/^`+|`+$/g, '').trim();
   };
 
   const song = pick('曲名');
 
   return {
-    // 擴充功能抓不到曲名時填的佔位字,不能當成真的曲名
+    // 擴充功能取不到曲名時填入的佔位字,不可視為真正的曲名
     song: /^[(（]請補上[)）]$/.test(song) ? '' : song,
     surface: pick('原文'),
     reading: pick('讀音'),
@@ -56,21 +56,21 @@ export function parseIssueBody(body) {
   };
 }
 
-/** 今天(UTC)的 yyyy-mm-dd,跟 dictionary.json 的 updatedAt 同一種寫法 */
+/** 今日(UTC)的 yyyy-mm-dd,與 dictionary.json 的 updatedAt 採同一種寫法 */
 function today() {
   return new Date().toISOString().slice(0, 10);
 }
 
 /**
- * 把一筆讀音加進字典。會就地修改傳進來的 dict。
+ * 將一筆讀音加入字典。會就地修改傳入的 dict。
  *
  * @param {object} dict 已經 JSON.parse 過的 dictionary.json
  * @param {object} options
  * @param {string} options.surface 原文
  * @param {string} options.reading 讀音(假名)
- * @param {string} [options.note] 出處,通常是曲名 + 這一句
+ * @param {string} [options.note] 出處,通常為曲名加上該句歌詞
  * @param {string} [options.song] 曲名;scope 為 'song' 時必填
- * @param {'global'|'song'} options.scope 收在通用層還是限定單曲
+ * @param {'global'|'song'} options.scope 收在通用層或限定單曲
  * @returns {{ok: boolean, reason?: string, action?: string}}
  */
 export function applyReading(dict, { surface, reading, note, song, scope }) {
@@ -114,10 +114,10 @@ export function applyReading(dict, { surface, reading, note, song, scope }) {
 }
 
 /**
- * 改完之後,用擴充功能自己的驗證器確認這一筆真的活得下來。
+ * 修改完成後,以擴充功能自身的驗證器確認這一筆確實存活。
  *
- * 沒有這一步的話,像「只有一個々」這種條目會被寫進檔案、commit 成功、
- * 然後在每個使用者的瀏覽器裡被默默丟掉 —— 一路上不會有任何錯誤訊息。
+ * 缺少這一步時,像「僅含一個々」這類條目會被寫入檔案、commit 成功,
+ * 然後在每個使用者的瀏覽器中被無聲丟棄 —— 全程不會有任何錯誤訊息。
  */
 export function survivesValidation(dict, { surface, reading, song, scope }) {
   const parsed = parseSharedDictionary(dict);
@@ -144,7 +144,7 @@ function main() {
   }
 
   if (!survivesValidation(dict, { surface, reading, song, scope })) {
-    // 擋下來的理由都寫在 shared-dictionary.js 的 isUsableEntry 裡
+    // 攔下的理由皆記載於 shared-dictionary.js 的 isUsableEntry
     fail(
       `「${surface} → ${reading}」沒通過字典的驗證,沒有寫入。` +
         '常見原因:讀音不是假名、或只選到疊字符(々 這類字要跟前面的字一起選)。'
@@ -152,13 +152,13 @@ function main() {
     return;
   }
 
-  // 尾端保留換行,跟編輯器存出來的檔案一致,diff 才不會多一行雜訊
+  // 尾端保留換行,與編輯器存出的檔案一致,diff 才不會多出一行雜訊
   writeFileSync(DICTIONARY_PATH, `${JSON.stringify(dict, null, 2)}\n`, 'utf8');
   succeed(`${result.action}:\`${surface}\` → \`${reading}\``);
 }
 
 function output(key, value) {
-  // Actions 的多行輸出要用分隔符包起來,不然含換行的訊息會被截斷
+  // Actions 的多行輸出須以分隔符包覆,否則含換行的訊息會被截斷
   const file = process.env.GITHUB_OUTPUT;
   const text = `${key}<<__EOF__\n${value}\n__EOF__\n`;
   if (file) writeFileSync(file, text, { flag: 'a' });
@@ -174,11 +174,11 @@ function fail(message) {
   output('ok', 'false');
   output('message', message);
   /*
-   * 刻意**不**用非零離開碼。
+   * 刻意不使用非零離開碼。
    *
-   * 這不是流程壞了,是這一筆不該收 —— 而使用者需要知道原因。
-   * 讓後面的步驟照常跑完,才有辦法把理由回覆到 issue 上;
-   * 直接讓工作失敗的話,他只會看到一個紅色叉叉,還要自己去翻 log。
+   * 這並非流程損壞,而是這一筆不該收錄 —— 且使用者需要知道原因。
+   * 讓後續步驟照常執行完畢,才有辦法將理由回覆至 issue 上;
+   * 直接令工作失敗的話,他只會看到一個紅色叉叉,還須自行翻查 log。
    */
   console.warn(message);
 }
