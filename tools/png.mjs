@@ -1,18 +1,18 @@
 /**
  * png.mjs
- * 最小的 PNG 讀寫,不依賴任何套件。
+ * 最小的 PNG 讀寫實作,不依賴任何套件。
  *
- * ── 為什麼不裝影像套件 ────────────────────────────────────────
- * 這個專案的 dependencies 會被打包進擴充功能,而使用者要能相信
- * 「這東西沒有偷做什麼」。多裝一個套件,對讀原始碼的人就是多一個要查的東西,
- * 而我們只需要 PNG 的一小部分功能。
+ * ── 不安裝影像套件的原因 ──────────────────────────────────────
+ * 本專案的 dependencies 會被打包進擴充功能,而使用者必須能相信
+ * 「這個東西沒有偷做什麼」。多裝一個套件,對閱讀原始碼的人而言就是多一項要查的東西,
+ * 而此處僅需要 PNG 的一小部分功能。
  *
- * 支援範圍刻意很窄:8 bit、非交錯。截圖工具與瀏覽器存出來的都是這種。
- * 遇到別的就明白報錯 —— 不要靜靜地輸出一張色彩壞掉的圖。
+ * 支援範圍刻意很窄:8 bit、非交錯。截圖工具與瀏覽器存出的皆為此種格式。
+ * 遇到其他格式即明確報錯 —— 不可無聲輸出一張色彩損壞的圖。
  *
- * 註:tools/make-icons.mjs 裡有一份更早、只處理方形的複本。那支是一次性的
- * (圖示已經產好了),而且它一被 import 就會重新產生圖示,所以不能直接沿用。
- * 下次真的要動它時再改成用這裡的。
+ * 註:tools/make-icons.mjs 內另有一份更早、僅處理方形的複本。該工具屬一次性
+ * (圖示已產生完畢),且其一經 import 便會重新產生圖示,故無法直接沿用。
+ * 下次確實要修改它時,再改為引用此處的實作。
  */
 
 import { deflateSync, inflateSync } from 'node:zlib';
@@ -45,8 +45,8 @@ function paeth(a, b, c) {
 }
 
 /**
- * 把每一列的濾波還原。
- * PNG 每一列可以選一種「跟左邊/上面的差值」來存,沒還原就直接讀,顏色會整片糊掉。
+ * 還原每一列的濾波。
+ * PNG 每一列可選擇一種「與左方或上方的差值」來儲存,未還原即直接讀取會使顏色整片糊掉。
  */
 function unfilter(raw, width, height, channels) {
   const stride = width * channels;
@@ -79,7 +79,7 @@ function unfilter(raw, width, height, channels) {
 
 /**
  * @param {Buffer} buffer PNG 檔案內容
- * @returns {{width: number, height: number, pixels: Buffer}} pixels 一律是 RGBA
+ * @returns {{width: number, height: number, pixels: Buffer}} pixels 一律為 RGBA
  */
 export function decodePng(buffer) {
   if (!buffer.subarray(0, 8).equals(SIGNATURE)) throw new Error('這不是 PNG 檔');
@@ -104,7 +104,7 @@ export function decodePng(buffer) {
       if (bitDepth !== 8) throw new Error(`只支援 8 bit 的 PNG(這張是 ${bitDepth})`);
       if (data[12] !== 0) throw new Error('不支援交錯式(interlaced)PNG');
 
-      // 0=灰階 2=RGB 4=灰階+透明 6=RGBA。3(調色盤)沒支援,截圖不會是那種。
+      // 0=灰階 2=RGB 4=灰階+透明 6=RGBA。3(調色盤)未支援,截圖不會是那種。
       const map = { 0: 1, 2: 3, 4: 2, 6: 4 };
       channels = map[colorType];
       if (!channels) throw new Error(`不支援的 PNG 色彩格式:${colorType}`);
@@ -117,7 +117,7 @@ export function decodePng(buffer) {
 
   const flat = unfilter(inflateSync(Buffer.concat(idat)), width, height, channels);
 
-  // 一律轉成 RGBA,後面就只要面對一種格式
+  // 一律轉為 RGBA,後續即只需面對一種格式
   const pixels = Buffer.alloc(width * height * 4);
   for (let i = 0; i < width * height; i += 1) {
     const s = i * channels;
@@ -142,9 +142,9 @@ function chunk(type, data) {
 }
 
 /**
- * @param {{width: number, height: number, pixels: Buffer}} image pixels 是 RGBA
+ * @param {{width: number, height: number, pixels: Buffer}} image pixels 為 RGBA
  * @param {{alpha?: boolean}} [options] 預設不含透明 —— Chrome 線上應用程式商店的
- *   截圖**不接受含透明色版的 PNG**,所以預設就存成 24 bit。
+ *   截圖不接受含透明色版的 PNG,故預設即存成 24 bit。
  */
 export function encodePng({ width, height, pixels }, { alpha = false } = {}) {
   const channels = alpha ? 4 : 3;
@@ -152,7 +152,7 @@ export function encodePng({ width, height, pixels }, { alpha = false } = {}) {
   const raw = Buffer.alloc((stride + 1) * height);
 
   for (let y = 0; y < height; y += 1) {
-    raw[y * (stride + 1)] = 0; // 不做濾波,單純一點
+    raw[y * (stride + 1)] = 0; // 不做濾波,保持單純
     for (let x = 0; x < width; x += 1) {
       const s = (y * width + x) * 4;
       const d = y * (stride + 1) + 1 + x * channels;
@@ -168,7 +168,7 @@ export function encodePng({ width, height, pixels }, { alpha = false } = {}) {
   ihdr.writeUInt32BE(height, 4);
   ihdr[8] = 8; // bit depth
   ihdr[9] = alpha ? 6 : 2; // color type
-  // 10=compression 11=filter 12=interlace 都是 0
+  // 10=compression 11=filter 12=interlace 皆為 0
 
   return Buffer.concat([
     SIGNATURE,
@@ -178,7 +178,7 @@ export function encodePng({ width, height, pixels }, { alpha = false } = {}) {
   ]);
 }
 
-/** 從四邊各切掉指定的像素 */
+/** 自四邊各切除指定的像素數 */
 export function crop(src, { left = 0, top = 0, right = 0, bottom = 0 }) {
   const width = src.width - left - right;
   const height = src.height - top - bottom;
@@ -193,8 +193,8 @@ export function crop(src, { left = 0, top = 0, right = 0, bottom = 0 }) {
 }
 
 /**
- * 縮放到指定大小。用區域平均(box filter)而不是取最近的點 ——
- * 截圖裡的文字用最近點縮小會糊成鋸齒,那是商店截圖最忌諱的。
+ * 縮放至指定大小。採區域平均(box filter)而非取最近點 ——
+ * 截圖中的文字以最近點縮小會糊成鋸齒,那是商店截圖最忌諱的。
  */
 export function resizeTo(src, width, height) {
   const pixels = Buffer.alloc(width * height * 4);
@@ -236,19 +236,19 @@ export function resizeTo(src, width, height) {
 }
 
 /**
- * 等比縮到剛好放得進 width×height,四周用 bg 補滿,圖置中。
+ * 等比縮至恰好放得進 width×height,四周以 bg 補滿,圖片置中。
  *
- * 為什麼不直接拉伸成目標比例:字會變胖或變扁,一眼就看得出廉價。
- * 為什麼不裁切:裁掉的可能正好是重點。
- * 補邊最安全 —— 底色跟畫面接近的話,看起來就像本來就是這個比例。
+ * 不直接拉伸成目標比例的原因:文字會變胖或變扁,一眼即可看出廉價。
+ * 不裁切的原因:裁去的可能正好是重點。
+ * 補邊最為安全 —— 底色與畫面接近時,看起來便像本來就是這個比例。
  */
 export function fitInto(src, width, height, bg) {
   /*
    * 只縮不放。
    *
-   * 截圖放大一定會糊 —— 那些像素本來就不存在,再好的演算法也是猜的。
-   * 留白至少是誠實的:畫面小,但每個字都是清楚的。
-   * 商店的圖被人放大看的時候,糊掉比留白難看得多。
+   * 截圖放大必然模糊 —— 那些像素本就不存在,再好的演算法亦屬推測。
+   * 留白至少是誠實的:畫面較小,但每個字都清晰。
+   * 商店的圖被人放大檢視時,模糊遠比留白難看。
    */
   const scale = Math.min(width / src.width, height / src.height, 1);
   const w = Math.max(1, Math.round(src.width * scale));
@@ -274,10 +274,10 @@ export function fitInto(src, width, height, bg) {
 }
 
 /**
- * 取四邊最常見的顏色,當補邊的底色。
+ * 取四邊最常見的顏色作為補邊的底色。
  *
- * 寫死一個深灰也行,但 Spotify 的歌詞頁底色是跟著專輯封面變的。
- * 取樣才能讓補的邊跟畫面融在一起,看不出是補的。
+ * 寫死一個深灰亦可,但 Spotify 的歌詞頁底色是隨專輯封面變動的。
+ * 取樣才能使補上的邊與畫面融為一體,看不出是補的。
  */
 export function edgeColor({ width, height, pixels }) {
   const counts = new Map();
