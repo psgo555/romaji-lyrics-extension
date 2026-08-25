@@ -1,17 +1,17 @@
 #!/usr/bin/env node
 /**
  * make-shots.mjs
- * 把隨手截的圖,做成 Chrome 線上應用程式商店要的規格。
+ * 將隨手截取的圖片轉為 Chrome 線上應用程式商店要求的規格。
  *
  *   node tools/make-shots.mjs <檔案或資料夾> [--crop-right 470] [--crop-top 0] ...
  *
- * 商店的要求:1280×800(或 640×400)、PNG 不含透明色版、最多 5 張。
- * 這支負責尺寸與去掉透明;**裁切要人自己決定** —— 哪一塊是重點,程式看不出來。
+ * 商店的要求:1280×800(或 640×400)、PNG 不含透明色版、至多 5 張。
+ * 本工具負責尺寸與去除透明;裁切須由人決定 —— 哪一塊是重點,程式看不出來。
  *
- * ── 為什麼要有這支 ────────────────────────────────────────────
- * 截圖工具框出來的大小是隨機的,直接上傳會被退件或被自動裁掉重點。
- * 手動用小畫家調又很容易把字弄糊(縮放演算法差),或存成含透明的 PNG 而被拒。
- * 這兩件事不值得每次上架前重做一遍。
+ * ── 需要本工具的原因 ──────────────────────────────────────────
+ * 截圖工具框出的大小是隨機的,直接上傳會被退件或被自動裁去重點。
+ * 手動以小畫家調整又容易使文字模糊(縮放演算法品質不佳),
+ * 或存成含透明色版的 PNG 而遭拒。這兩件事不值得每次上架前重做一遍。
  */
 
 import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
@@ -61,7 +61,7 @@ function main() {
     process.exit(1);
   }
 
-  // 輸出放在來源旁邊的 out/,不要蓋掉原檔 —— 裁切的數字常常要試好幾次
+  // 輸出置於來源旁的 out/,不覆蓋原檔 —— 裁切的數字往往要試上數次
   const outDir = join(statSync(input).isDirectory() ? input : dirname(input), 'out');
   mkdirSync(outDir, { recursive: true });
 
@@ -72,7 +72,7 @@ function main() {
     const cropped = hasCrop ? crop(source, box) : source;
     const result = fitInto(cropped, TARGET_WIDTH, TARGET_HEIGHT, edgeColor(cropped));
 
-    writeFileSync(join(outDir, basename(file)), encodePng(result)); // 不含透明
+    writeFileSync(join(outDir, basename(file)), encodePng(result)); // 不含透明色版
 
     const padded = result.inner.width < TARGET_WIDTH || result.inner.height < TARGET_HEIGHT;
     console.log(
