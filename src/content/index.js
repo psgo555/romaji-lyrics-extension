@@ -98,9 +98,20 @@ const ACTIVE_TICK_MS = 80;
  * 完全相同,那組估算不論如何調整都只是在兩種誤差之間換邊。
  * 現行作法為:有逐字時間軸即精準掃描,沒有則整句一起亮。
  */
-// 歌詞檢視已開啟、卻連續這麼多秒仍等不到任何一行,才向 LRCLIB 查詢。
-// 給予足夠時間讓 Spotify 自行載入歌詞,不要過早下結論。
-const FALLBACK_AFTER_TICKS = 12;
+/*
+ * 歌詞檢視已開啟、卻連續這麼多秒仍等不到任何一行,才向 LRCLIB 查詢。
+ *
+ * 這個數字是在兩種代價之間取捨:
+ * - 太短 → Spotify 其實只是載得慢,結果搶先開了面板;雖然 Spotify 的歌詞
+ *   一出現 tick() 就會收掉面板,但使用者會看到它閃一下,也白問了一次 LRCLIB
+ * - 太長 → 真的沒有歌詞的歌,要乾等這麼久才有東西可看
+ *
+ * 原為 12,實際使用後判斷等待過久,改為 4。
+ * 搶先開面板的代價有兩道防護:送出請求後、真正開啟面板之前會再確認一次
+ * Spotify 的歌詞是否已經出現(見 tryLrclibFallback),而即使漏掉,
+ * tick() 下一秒也會把面板收起來。
+ */
+const FALLBACK_AFTER_TICKS = 4;
 
 let settings = { ...DEFAULTS };
 let observer = null;
@@ -1351,7 +1362,19 @@ function tick() {
     }
   } else if (isLyricsViewOpen()) {
     emptyTicks += 1; // 面板開啟卻是空的 —— 可能是 paywall、沒有歌詞,或仍在載入
-    if (emptyTicks === FALLBACK_AFTER_TICKS) tryLrclibFallback();
+    /*
+     * 用 >= 而非 ===。
+     *
+     * 嚴格相等代表「只有第 N 秒那一瞬間會嘗試」,而 tryLrclibFallback 前方
+     * 有三道會提早退出的關卡(轉換關閉中、讀不到曲名、已經問過)。前兩道
+     * 一旦剛好發生在那一秒,這首歌就再也不會嘗試 —— 計數只會往上加,
+     * 永遠回不到 N。使用者得換歌或關掉再開歌詞檢視才會重新計時,
+     * 而他不會知道要這樣做。
+     *
+     * 改為 >= 之後每秒都會再試一次,重複請求由 fallbackAskedFor 擋掉,
+     * 只有前兩道關卡造成的落空會真正重試 —— 那兩者都只是本地檢查,很便宜。
+     */
+    if (emptyTicks >= FALLBACK_AFTER_TICKS) tryLrclibFallback();
   } else {
     emptyTicks = 0; // 面板根本未開啟,不可下任何結論
 
@@ -1516,8 +1539,20 @@ async function tryLrclibFallback() {
     // 而長度決定了 service worker 挑選哪個版本(見 askForLyrics 的說明)
     const res = await askForLyrics(nowPlaying);
     if (res?.timedOut) {
-      console.warn(`${LOG} LRCLIB 查詢逾時,稍後換歌時會再試`);
-      fallbackAskedFor = null; // 逾時不算查詢過,允許重試
+      console.warn(`${LOG} LRCLIB 查詢逾時,再等 ${FALLBACK_AFTER_TICKS} 秒後重試`);
+      /*
+       * 逾時不算查詢過,允許重試 —— 但兩行要一起寫。
+       *
+       * 只清掉 fallbackAskedFor 的話,上面的 `emptyTicks >= FALLBACK_AFTER_TICKS`
+       * 已經永遠成立,於是下一秒就會再問一次、再逾時、再清掉 ——
+       * 變成一個沒有煞車的重試迴圈,而對象是別人免費提供的服務。
+       * (service worker 那邊的 inFlight 會把同時進來的請求併成一個,
+       *  所以不至於每秒真的送出一次,但沒有上限這件事本身就不該留著。)
+       *
+       * 把計數歸零,它就要重新等滿一輪才會再試,retry 才有節制。
+       */
+      fallbackAskedFor = null;
+      emptyTicks = 0;
       return;
     }
     if (!res?.lines?.length && !res?.synced) {
