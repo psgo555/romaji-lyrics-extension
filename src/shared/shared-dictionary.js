@@ -1,54 +1,54 @@
 /**
  * shared-dictionary.js
- * 驗證從網路抓回來的共用讀音字典。
+ * 驗證自網路取得的共用讀音字典。
  *
- * ── 為什麼這支要特別嚴 ────────────────────────────────────────
- * 這是整個專案裡**唯一會影響畫面、內容卻不由自己掌控**的資料。
- * 它從 GitHub 抓回來,而沒擋好的話壞法有兩種:
+ * ── 本模組須特別嚴格的原因 ──────────────────────────────────
+ * 這是整個專案中唯一會影響畫面、內容卻不由自身掌控的資料。
+ * 它自 GitHub 取得,未攔妥時的損壞方式有兩種:
  *
- *   1. 格式壞掉 → 轉換流程炸掉,使用者連原本能用的拼音都沒了
- *   2. 內容壞掉 → 畫面**很有自信地顯示錯的拼音**,而沒人知道那是錯的
+ *   1. 格式損壞 → 轉換流程中斷,使用者連原本可用的拼音都失去
+ *   2. 內容錯誤 → 畫面以確信的樣態顯示錯誤的拼音,而無人知其為錯
  *
- * 第二種更糟。轉不出來的字至少會原樣顯示,使用者看得出「這個沒轉」;
- * 但唸錯的拼音跟對的長得一模一樣。
+ * 第二種更為嚴重。轉換失敗的字至少會原樣顯示,使用者看得出「這個沒轉」;
+ * 但唸錯的拼音與正確的外觀完全相同。
  *
- * 所以原則是:**寧可整份丟掉,也不要放進可疑的東西**。
- * 單筆有問題就跳過那一筆,結構有問題就整份不要 —— 反正還有內建字典,
- * 退回去只是少了新詞,不會壞掉。
+ * 故原則是:寧可整份捨棄,亦不放行可疑的內容。
+ * 單筆有問題即跳過該筆,結構有問題則整份不採 —— 內建字典仍在,
+ * 退回去只是少了新詞,不會損壞。
  *
- * 這支不碰 chrome 也不碰網路,純資料驗證,可以直接用 Node 測。
+ * 本模組不觸及 chrome 亦不連網,純資料驗證,可直接以 Node 測試。
  */
 
-// 直接跟 cjk 拿:繞經 reading.js 會把 wanakana 一起拖進背景程式
+// 直接自 cjk 取用:繞經 reading.js 會將 wanakana 一併拖入背景程式
 import { isValidReading, isIterationMarkOnly } from '../content/cjk.js';
 
-/** 認得的格式版本。改格式時一起改這裡,舊版擴充功能會自動忽略新格式。 */
+/** 可辨識的格式版本。變更格式時一併修改此處,舊版擴充功能會自動忽略新格式。 */
 export const SUPPORTED_VERSION = 1;
 
 /*
- * ── 為什麼加了 songs 卻**不**改版本號 ──────────────────────────
+ * ── 加入 songs 卻不推進版本號的原因 ───────────────────────────
  * songs 是一個新的頂層欄位,舊版擴充功能只讀 entries、根本不會看它,
- * 所以舊版拿到新檔案仍然完全正確 —— 只是少了限定單曲的那些條目。
+ * 因此舊版取得新檔案仍然完全正確 —— 僅是少了限定單曲的那些條目。
  *
- * 改版本號反而更糟:舊版的規則是「認不得的版本整份不要」,
- * 那會讓所有還沒更新的人連原本能用的全域條目也一起失去。
+ * 推進版本號反而更糟:舊版的規則是「無法辨識的版本整份不採」,
+ * 那會使所有尚未更新的使用者連原本可用的全域條目也一併失去。
  *
- * 判斷標準是**舊版會不會做出錯的事**,不是「格式有沒有變」。
- * 哪天要改的是 entries 本身的意義,那時才非改版本號不可。
+ * 判斷標準是舊版會不會做出錯誤的事,而非「格式有沒有變」。
+ * 日後若要變更的是 entries 本身的意義,屆時才非推進版本號不可。
  */
 
 /*
  * 數量與長度上限。
  *
- * 不是怕檔案大,是怕**出事的時候**:萬一有一筆 surface 長達幾萬字,
- * applyCorrectionsWith 是對每個位置拿整張表去比對的,那會讓每一行歌詞
- * 都慢下來,而使用者只會覺得「這擴充功能好卡」,查不到原因。
+ * 並非顧慮檔案大小,而是顧慮出事的情況:萬一有一筆 surface 長達數萬字,
+ * applyCorrectionsWith 是對每個位置取整張表比對的,那會使每一行歌詞
+ * 都慢下來,而使用者只會覺得「這個擴充功能很卡」,查不出原因。
  */
 const MAX_ENTRIES = 5000;
 const MAX_SURFACE_LENGTH = 40;
 const MAX_READING_LENGTH = 60;
 
-/** 限定單曲的條目:同樣的理由,只是分成兩層來限 */
+/** 限定單曲的條目:理由相同,僅是分成兩層設限 */
 const MAX_SONGS = 2000;
 const MAX_ENTRIES_PER_SONG = 200;
 const MAX_TITLE_LENGTH = 200;
@@ -56,13 +56,13 @@ const MAX_TITLE_LENGTH = 200;
 /**
  * 曲名的比對用寫法。
  *
- * ── 為什麼只看曲名,不看歌手 ────────────────────────────────
- * 因為翻唱版要吃得到同一筆修正。同一首歌換一個人唱,歌詞是一樣的,
- * 讀錯的字也會一樣讀錯 —— 綁上歌手等於每個版本都要有人再報一次。
+ * ── 只看曲名而不看歌手的原因 ────────────────────────────────
+ * 為使翻唱版能套用同一筆修正。同一首歌換人演唱,歌詞相同,
+ * 讀錯的字也會相同 —— 綁上歌手等於每個版本都須有人再回報一次。
  *
- * 撞名的風險很小:條目要生效,除了曲名相同,那個詞還得真的出現在
- * 這首歌的歌詞裡。兩首同名的歌又剛好有同一個詞才會誤中,
- * 而即使誤中了,影響也只在那一首歌,不像全域條目會波及所有人所有歌。
+ * 撞名的風險很小:條目要生效,除曲名相同外,該詞還須確實出現在
+ * 這首歌的歌詞中。兩首同名的歌又恰好含同一個詞才會誤中,
+ * 而即使誤中,影響亦僅限於那一首歌,不似全域條目會波及所有人所有歌。
  */
 export function normalizeSongTitle(title) {
   if (typeof title !== 'string') return '';
@@ -70,17 +70,19 @@ export function normalizeSongTitle(title) {
 }
 
 /**
- * 把抓回來的內容驗成一份可以用的修正表。
+ * 將取得的內容驗證成一份可用的修正表。
  *
  * @param {unknown} raw 已經 JSON.parse 過的內容
- * @returns {{ entries: Array<{surface: string, reading: string}>, skipped: number }}
- *          結構有問題時 entries 是空陣列 —— 呼叫端就退回內建字典
+ * @returns {{ entries: Array<{surface: string, reading: string}>,
+ *             songs: Record<string, Array<{surface: string, reading: string}>>,
+ *             skipped: number }}
+ *          結構有問題時 entries 與 songs 皆為空 —— 呼叫端即退回內建字典
  */
 export function parseSharedDictionary(raw) {
   const empty = { entries: [], songs: {}, skipped: 0 };
 
   if (!raw || typeof raw !== 'object') return empty;
-  if (raw.version !== SUPPORTED_VERSION) return empty; // 認不得的版本整份不要
+  if (raw.version !== SUPPORTED_VERSION) return empty; // 無法辨識的版本整份不採
   if (!Array.isArray(raw.entries)) return empty;
 
   const entries = [];
@@ -93,11 +95,11 @@ export function parseSharedDictionary(raw) {
       continue;
     }
     seen.add(item.surface);
-    // 只留需要的兩個欄位 —— note 是給人看的,不要讓它流進轉換流程
+    // 僅保留需要的兩個欄位 —— note 是給人閱讀的,不應流入轉換流程
     entries.push({ surface: item.surface, reading: item.reading });
   }
 
-  // 超過上限被截掉的那些也算跳過,數字才誠實
+  // 超出上限而被截去的那些同樣計入跳過,數字才誠實
   skipped += Math.max(0, raw.entries.length - MAX_ENTRIES);
 
   const songs = parseSongs(raw.songs, (n) => {
@@ -110,22 +112,22 @@ export function parseSharedDictionary(raw) {
 /**
  * 限定單曲的條目。
  *
- * ── 為什麼需要這一層 ──────────────────────────────────────
- * 回報的人沒有辦法判斷一筆修正在**別的**歌裡安不安全。
- * 「失 → な」在某首歌是對的,可是一旦全域生效,失敗會變成なはい。
- * 要求每個回報的人都想清楚這件事,等於這個功能只有懂日文的人能用。
+ * ── 需要這一層的原因 ──────────────────────────────────────
+ * 回報者無從判斷一筆修正在其他歌曲中是否安全。
+ * 「失 → な」在某首歌是正確的,可是一旦全域生效,失敗便會變成なはい。
+ * 要求每位回報者都想清楚此事,等於此功能僅有懂日文者能使用。
  *
- * 綁在一首歌上就不必判斷了:錯了也只錯那一首,而同一首歌的其他人
- * 直接拿到修好的結果,不必每個人再修一次 —— 那正是共用字典的意義。
+ * 綁在一首歌上則毋須判斷:即使錯誤亦僅錯那一首,而同一首歌的其他使用者
+ * 可直接取得修正後的結果,不必逐一再修一次 —— 那正是共用字典的意義。
  *
- * 全域條目仍然保留,給「不管哪首歌都該這樣讀」的詞(人名、固定讀法)。
+ * 全域條目仍然保留,供「不論哪首歌都應如此讀」的詞使用(人名、固定讀法)。
  *
- * @param {unknown} raw dictionary.json 的 songs 欄位;沒有就當空的
- * @param {(count: number) => void} countSkipped 把跳過的筆數回報給呼叫端
+ * @param {unknown} raw dictionary.json 的 songs 欄位;缺少時視為空
+ * @param {(count: number) => void} countSkipped 將跳過的筆數回報給呼叫端
  * @returns {Record<string, Array<{surface: string, reading: string}>>}
  */
 function parseSongs(raw, countSkipped) {
-  if (!Array.isArray(raw)) return {}; // 沒有這個欄位是正常的,不是錯誤
+  if (!Array.isArray(raw)) return {}; // 缺少此欄位屬正常情形,並非錯誤
 
   const songs = {};
 
@@ -141,7 +143,7 @@ function parseSongs(raw, countSkipped) {
       continue;
     }
 
-    // 同一首歌出現兩次時把條目併起來,不要讓後面那筆整個蓋掉前面的
+    // 同一首歌出現兩次時合併其條目,不使後者整個覆蓋前者
     const list = songs[title] ?? [];
     const seen = new Set(list.map((e) => e.surface));
 
@@ -163,8 +165,8 @@ function parseSongs(raw, countSkipped) {
 }
 
 /**
- * 這一筆能不能用。
- * 每一條都是為了擋掉一種具體的壞法,不是形式上的檢查。
+ * 該筆是否可用。
+ * 每一項檢查都是為了擋下一種具體的損壞方式,並非形式上的檢查。
  */
 function isUsableEntry(item, seen) {
   if (!item || typeof item !== 'object') return false;
@@ -176,26 +178,26 @@ function isUsableEntry(item, seen) {
   if (surface.length > MAX_SURFACE_LENGTH) return false;
   if (reading.length > MAX_READING_LENGTH) return false;
 
-  // 同一個原文出現兩次時以先出現的為準,不要讓後面的偷偷蓋掉
+  // 同一個原文出現兩次時以先出現者為準,不使後者無聲覆蓋
   if (seen.has(surface)) return false;
 
   /*
-   * 只有疊字符(々 之類)的條目一律擋掉。
+   * 僅含疊字符(々 之類)的條目一律擋下。
    *
-   * 它讀什麼完全取決於前一個字(時々=ときどき、人々=ひとびと),
-   * 單獨指定一個讀音必定會弄壞其他所有含它的詞 —— 而且是弄壞所有使用者的。
+   * 其讀音完全取決於前一個字(時々=ときどき、人々=ひとびと),
+   * 單獨指定一個讀音必然破壞其他所有含它的詞 —— 且是破壞所有使用者的。
    *
-   * 面板那邊已經擋了一層,但這裡是**資料層**:有人直接送 PR 改這個檔案時,
-   * 面板的防護一點作用都沒有。兩邊都要擋。
+   * 面板已擋了一層,但此處是資料層:有人直接送 PR 修改這個檔案時,
+   * 面板的防護毫無作用。兩處皆須攔下。
    */
   if (isIterationMarkOnly(surface)) return false;
 
   /*
-   * reading 必須是假名 —— 只有一個例外:寫成跟 surface 一樣代表
+   * reading 必須為假名 —— 僅有一個例外:寫成與 surface 相同代表
    * 「原樣放過」,那是守衛條目的用法(見 一人称)。
    *
-   * 少了這道檢查,有人填了漢字或英文進來,轉出來的結果會混著沒轉的東西,
-   * 而且因為進了修正表,那個錯誤會蓋過 kuromoji 本來正確的判斷。
+   * 缺少這道檢查時,若有人填入漢字或英文,轉換結果會混有未轉換的內容,
+   * 且因其已進入修正表,該錯誤會覆蓋 kuromoji 本來正確的判斷。
    */
   if (reading === surface) return true;
   return isValidReading(reading);
