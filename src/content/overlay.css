@@ -515,15 +515,22 @@ html[data-romaji-mode='kana'] .romaji-ch:not([data-romaji-unknown]):hover {
   color: #fff; /* 已經唱過的 */
 }
 
+/*
+ * 使用者若偏好減少動態效果,便不做顏色漸變。
+ *
+ * 選擇器必須與其所要覆蓋的那兩條規則完全相同,不可簡寫為 .romaji-ch
+ * 或 .romaji-overlay —— media query 不會增加特異性,單一 class(0,1,0)
+ * 蓋不過 (0,4,0) 與 (0,2,1),那樣寫等同整段無效,且不會有任何跡象。
+ * 兩條皆排在被覆蓋者之後,同特異性時由後者勝出。
+ */
 @media (prefers-reduced-motion: reduce) {
-  .romaji-ch {
+  [data-romaji-active='true'] .romaji-overlay[data-romaji-sweep] .romaji-ch {
     transition: none;
   }
-}
 
-/* 使用者若偏好減少動態效果,便不做顏色漸變 */
-@media (prefers-reduced-motion: reduce) {
-  .romaji-overlay {
+  html[data-romaji-mode='romaji-only'] .romaji-overlay,
+  html[data-romaji-mode='both'] .romaji-overlay,
+  html[data-romaji-mode='kana'] .romaji-overlay {
     transition: none;
   }
 }
