@@ -30,6 +30,7 @@ import {
   paintSweep,
 } from './sync-highlight.js';
 import { clampToViewport } from './drag-bounds.js';
+import { seekTo } from './playback-clock.js';
 
 const LOG = '[romaji]';
 
@@ -271,11 +272,20 @@ function buildShell(title, subtitle) {
  * 再將拼音填入 .romaji-overlay)。兩種來源共用同一套流程,
  * 即不致出現「Spotify 側已修好、面板側仍為舊行為」的情形。
  */
-function buildLine(text) {
+function buildLine(text, timeMs) {
   const li = document.createElement('li');
   li.className = LINE_CLASS;
   // 間奏行(僅有時間而無文字)須保留以佔位,否則高亮會停滯於上一句
   li.textContent = text || '';
+
+  /*
+   * 起始時間記在元素上,供點擊跳轉使用(見 seekFromPanelClick)。
+   *
+   * 只有拿得到時間軸的歌才會有這個屬性 —— 純文字歌詞不設,
+   * CSS 也就不會給它手指游標。不能點的東西不該看起來能點。
+   */
+  if (Number.isFinite(timeMs)) li.dataset.romajiSeekMs = String(Math.round(timeMs));
+
   return li;
 }
 
@@ -306,7 +316,7 @@ export function openLrcPanel({ title, subtitle, timed, plain, onClose }) {
   onCloseCallback = onClose ?? null;
 
   lineEls = source.map((line) => {
-    const el = buildLine(line.text);
+    const el = buildLine(line.text, line.timeMs);
     bodyEl.appendChild(el);
     return el;
   });
@@ -357,6 +367,40 @@ export function isLrcPanelOpen() {
 /** 面板上的行元素。index.js 的佇列依此決定先轉換哪一行。 */
 export function getPanelLineElements() {
   return lineEls;
+}
+
+/**
+ * 點面板上的某一句 → 跳到該句的播放位置。
+ *
+ * Spotify 自身的歌詞本就點得動,本面板原本只能一路往下看 ——
+ * 想重聽某一句只能拖進度條慢慢找,而那正是跟唱時最常做的事。
+ *
+ * 回傳「有沒有處理掉這一次點擊」,由 index.js 在既有的點擊委派中呼叫,
+ * 與 correction-popover 的 handleOutsideClick 同一個慣例,不另掛 listener。
+ * 回傳 false 時呼叫端會照舊處理(放游標),因此拿不到時間軸的歌
+ * 行為與改動前完全相同。
+ *
+ * @param {EventTarget} target 被點到的元素
+ * @returns {boolean}
+ */
+export function seekFromPanelClick(target) {
+  if (!panelEl) return false;
+
+  const line = target?.closest?.(`.${LINE_CLASS}`);
+  if (!line || !panelEl.contains(line)) return false;
+
+  /*
+   * 拉選文字之後放開也會派送 click,那不是「要跳」的意思。
+   * 少了這道判斷,想複製一句歌詞就會把歌跳走 —— 而且跳走之後
+   * 選取還會被清掉,等於白做一次。
+   */
+  const selection = window.getSelection?.();
+  if (selection && !selection.isCollapsed && selection.toString().trim()) return false;
+
+  const ms = Number(line.dataset.romajiSeekMs);
+  if (!Number.isFinite(ms)) return false; // 純文字歌詞沒有時間可跳
+
+  return seekTo(ms);
 }
 
 /**

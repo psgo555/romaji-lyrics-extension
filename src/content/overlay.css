@@ -831,6 +831,24 @@ html[data-romaji-mode='off'] .romaji-overlay {
   border-left-color: #1db954;
 }
 
+/*
+ * 可點擊跳轉的行。
+ *
+ * 只有拿得到時間軸的歌才會有 data-romaji-seek-ms —— 純文字歌詞沒有這個
+ * 屬性,也就不會拿到手指游標。不能點的東西不該看起來能點,
+ * 那種假承諾比少一個功能更糟。
+ *
+ * hover 的底色刻意很淡:面板上整片都是可點的行,對比一拉高就會像
+ * 一排按鈕,而它本體是歌詞。
+ */
+.romaji-lrc-line[data-romaji-seek-ms] {
+  cursor: pointer;
+}
+
+.romaji-lrc-line[data-romaji-seek-ms]:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
 .romaji-lrc-line .romaji-original {
   color: #d8d8d8;
 }
