@@ -1,11 +1,11 @@
 /**
  * build.mjs
- * 用 esbuild 把 wanakana / kuroshiro / kuromoji 打包進擴充功能。
+ * 以 esbuild 將 wanakana / kuroshiro / kuromoji 打包進擴充功能。
  *
- * 為什麼一定要打包(README 限制 #1):
- * 頁面 CSP 會擋掉從 CDN 動態載入的 script,擴充功能必須自帶所有程式碼。
+ * 必須打包的原因(README 限制 #1):
+ * 頁面 CSP 會阻擋自 CDN 動態載入的 script,擴充功能必須自帶全部程式碼。
  *
- * 產出 dist/ 就是「載入未封裝項目」要選的資料夾。
+ * 產出的 dist/ 即為「載入未封裝項目」所要選擇的資料夾。
  */
 
 import { build, context } from 'esbuild';
@@ -19,18 +19,18 @@ const dist = path.join(root, 'dist');
 const watch = process.argv.includes('--watch');
 
 /*
- * 送給 LRCLIB 的來源識別碼,從 package.json 取得,不在程式裡另外寫死一份。
+ * 送交 LRCLIB 的來源識別碼,自 package.json 取得,不在程式中另寫一份。
  *
- * 為什麼要這樣繞:LRCLIB 要求標明來源,是為了出問題時能聯絡開發者。
- * 先前那裡填的是 github.com/local/... 這種不存在的網址,等於規避了這個要求。
- * 改成從 package.json 讀,版本號也自動跟著走,不會出現「程式裡寫 0.1.0、
- * 實際已經是 0.3.0」這種對不上的情況。
+ * 如此迂迴的原因:LRCLIB 要求標明來源,是為了出問題時能聯絡開發者。
+ * 先前該處填的是 github.com/local/... 這類不存在的網址,形同規避該項要求。
+ * 改為自 package.json 讀取後版本號亦自動跟進,不致出現「程式中寫 0.1.0、
+ * 實際已是 0.3.0」的落差。
  */
 const pkg = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
 const repoUrl = pkg.repository?.url ?? '';
 const clientHeader = `${pkg.name}/${pkg.version} (${repoUrl})`;
 
-/** 還沒把 GitHub 帳號填進去就大聲擋下來,免得帶著佔位網址發布出去 */
+/** 尚未填入 GitHub 帳號時明確警示,避免帶著佔位網址發布出去 */
 function assertRepoConfigured() {
   if (!repoUrl.includes('YOUR-USERNAME')) return;
   console.error('\n' + '='.repeat(70));
@@ -46,10 +46,10 @@ function assertRepoConfigured() {
 }
 
 /**
- * kuromoji 的 package.json 有 browser 欄位,esbuild 的 platform:'browser'
- * 會自動把 NodeDictionaryLoader 換成 BrowserDictionaryLoader(用 XMLHttpRequest 讀 .dat.gz)。
- * 萬一還有沒被換掉的 node 專用 require 漏進來,這個 plugin 會把 fs 解析成空模組,
- * 讓打包不至於整個失敗。
+ * kuromoji 的 package.json 含 browser 欄位,esbuild 的 platform:'browser'
+ * 會自動將 NodeDictionaryLoader 換成 BrowserDictionaryLoader(以 XMLHttpRequest 讀取 .dat.gz)。
+ * 萬一仍有未被替換的 node 專用 require 漏入,本 plugin 會將 fs 解析為空模組,
+ * 使打包不致整個失敗。
  */
 const stubNodeBuiltins = {
   name: 'stub-node-builtins',
@@ -82,15 +82,15 @@ const bundleOptions = {
   logLevel: 'info',
   define: {
     global: 'globalThis',
-    // 來源識別碼在打包時注入,程式裡不寫死(見上方 clientHeader 的說明)
+    // 來源識別碼於打包時注入,程式中不寫死(見上方 clientHeader 的說明)
     __LRCLIB_CLIENT__: JSON.stringify(clientHeader),
-    // 分享讀音時要開的 issue 頁面,同樣不在程式裡寫死
+    // 分享讀音時要開啟的 issue 頁面,同樣不在程式中寫死
     __REPO_URL__: JSON.stringify(repoUrl),
   },
   alias: { path: 'path-browserify' },
   plugins: [stubNodeBuiltins],
-  // kuroshiro-analyzer-kuromoji 只有在沒收到 dictPath 時才會走 require.resolve("kuromoji")
-  // 去猜辭典位置。我們一律明確傳入 chrome.runtime.getURL('dict/'),那段是死碼。
+  // kuroshiro-analyzer-kuromoji 僅在未收到 dictPath 時才會透過 require.resolve("kuromoji")
+  // 推測辭典位置。此處一律明確傳入 chrome.runtime.getURL('dict/'),那一段是死碼。
   logOverride: { 'require-resolve-not-external': 'silent' },
 };
 
@@ -106,19 +106,19 @@ async function copyStatic() {
 }
 
 /*
- * 第三方套件的授權聲明,一定要跟著進擴充功能。
+ * 第三方套件的授權聲明必須一併納入擴充功能。
  *
- * ── 這不是禮貌問題,是授權條款的明文要求 ──────────────────────
- * kuromoji 是 Apache-2.0,規定散布時要附上 NOTICE。
- * 而它裡面那份辭典(mecab-ipadic)的條款講得更死:
- *   「任何複製品,不論原樣或修改過,都必須包含上述版權聲明與以下段落」
- *   而且免責聲明那段寫明 ALWAYS 要附上。
+ * ── 這並非禮貌問題,而是授權條款的明文要求 ────────────────────
+ * kuromoji 為 Apache-2.0,規定散布時須附上 NOTICE。
+ * 而其中隨附的辭典(mecab-ipadic)條款更為明確:
+ *   「任何複製品,不論原樣或經修改,皆必須包含上述版權聲明與以下段落」
+ *   且免責聲明該段寫明 ALWAYS 須附上。
  * MIT(kuroshiro、wanakana)同樣要求保留版權聲明。
  *
- * 自己載來用不受影響,一旦公開散布就必須附。
+ * 自行下載使用不受影響,一旦公開散布即必須附上。
  *
- * 刻意從 node_modules 實際讀取而不是手抄一份:手抄的不會跟著套件升級走,
- * 哪天換了版本、條款改了也不會有人發現。
+ * 刻意自 node_modules 實際讀取而非手抄一份:手抄的內容不會隨套件升級更新,
+ * 日後換了版本、條款有所變動亦不會有人察覺。
  */
 const LICENSED_PACKAGES = [
   { name: 'kuroshiro', files: ['LICENSE'] },
@@ -142,7 +142,7 @@ async function copyLicenses() {
     for (const file of pkg.files) {
       const source = path.join(root, 'node_modules', pkg.name, file);
       if (!existsSync(source)) {
-        // 硬性失敗 —— 少附一份授權就是違反條款,不可以安靜略過
+        // 硬性失敗 —— 少附一份授權即違反條款,不可無聲略過
         throw new Error(`找不到 ${pkg.name}/${file},無法產生授權聲明。請先執行 npm install`);
       }
       parts.push(
@@ -160,7 +160,7 @@ async function copyLicenses() {
   console.log(`  已產生 THIRD-PARTY-NOTICES.txt(${LICENSED_PACKAGES.length} 個套件)`);
 }
 
-/** kuromoji 的辭典檔要跟著進擴充功能,由 manifest 的 web_accessible_resources 開放讀取 */
+/** kuromoji 的辭典檔須一併納入擴充功能,由 manifest 的 web_accessible_resources 開放讀取 */
 async function copyDictionary() {
   const src = path.join(root, 'node_modules/kuromoji/dict');
   if (!existsSync(src)) {
@@ -174,13 +174,13 @@ async function copyDictionary() {
 /* ---------------------------------------------------------------- 圖示 */
 
 /*
- * 圖示是預先產好的,放在 public/icons/,這裡只負責複製。
+ * 圖示為預先產生,置於 public/icons/,此處僅負責複製。
  *
- * 為什麼不在這裡即時產生:圖示的來源是一張 1254x1254 的 PNG,
- * 要去背、裁切、重新取樣才能變成 16/48/128。那些程式不短,
- * 而圖示幾乎不會變 —— 每次 build 都跑一遍只是浪費時間,也讓這支難讀。
+ * 不在此即時產生的原因:圖示的來源是一張 1254x1254 的 PNG,
+ * 須去背、裁切、重新取樣才能成為 16/48/128。那些程式並不短,
+ * 而圖示幾乎不會變動 —— 每次 build 都執行一遍只是浪費時間,亦使本檔難讀。
  *
- * 換圖的流程:換掉 public/icon-source.png → npm run icons → 產出進版控。
+ * 更換圖示的流程:替換 public/icon-source.png → npm run icons → 產出進版控。
  */
 async function copyIcons() {
   const src = path.join(root, 'public/icons');
