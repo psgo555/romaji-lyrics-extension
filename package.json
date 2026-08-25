@@ -1,6 +1,6 @@
 {
   "name": "romaji-lyrics-extension",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "Chrome 擴充功能:在 Spotify 網頁版的日文歌詞下方顯示羅馬拼音",
   "license": "MIT",
