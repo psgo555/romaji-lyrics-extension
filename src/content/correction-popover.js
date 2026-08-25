@@ -1,23 +1,23 @@
 /**
  * correction-popover.js
- * 點一下轉不出來的漢字,當場補上讀音。
+ * 點選轉換失敗的漢字,當場補上讀音。
  *
- * 為什麼要有這個:kuromoji 的內建辭典一定會有讀不出來的詞,
- * 每遇到一個都要改程式碼、重新 build、重新載入太慢。
- * 這裡讓使用者當場補,存進瀏覽器、立刻生效、之後所有歌曲通用。
+ * 必要性:kuromoji 的內建辭典必然存在讀不出來的詞,若每遇一個便修改程式碼、
+ * 重新 build 並重新載入,速度過慢。此處讓使用者當場補上,存入瀏覽器後立即生效,
+ * 之後所有歌曲皆通用。
  *
- * ── 兩個一定要留意的設計約束 ─────────────────────────────────
+ * ── 兩項須留意的設計約束 ─────────────────────────────────────
  *
- * 1. 必須是**整個詞**,不能只改其中一個字。
- *    只替換一部分會破壞斷詞:把「怨子」的「怨」單獨換成「えん」會變成
- *    「えん子」→ e n ko(多了空格),比原本更糟。
- *    所以有選詞器讓使用者把範圍拉到整個詞,並用即時預覽把結果攤開來看。
+ * 1. 必須以整個詞為單位,不可只修改其中一個字。
+ *    僅替換一部分會破壞斷詞:將「怨子」的「怨」單獨換成「えん」會得到
+ *    「えん子」→ e n ko(多出空格),較原本更差。
+ *    故提供選詞器讓使用者將範圍拉至整個詞,並以即時預覽呈現結果。
  *
- * 2. 不可以干擾既有的「點擊切分」與鍵盤編輯模式。
- *    - 只在**非編輯模式**時才攔截點擊(在轉不出來的漢字裡插空格本來就沒意義)
- *    - 不新增任何 document 層級的按鍵監聽,改成重用 index.js 傳進來的
- *      按鍵防護 —— Spotify 的播放/暫停綁在空白鍵的 keyup,
- *      在輸入框打字時若不擋,打一個空格音樂就停了
+ * 2. 不可干擾既有的「點擊切分」與鍵盤編輯模式。
+ *    - 僅在非編輯模式時攔截點擊(在轉換失敗的漢字中插入空格本無意義)
+ *    - 不新增任何 document 層級的按鍵監聽,改為重用 index.js 傳入的按鍵防護 ——
+ *      Spotify 的播放/暫停綁在空白鍵的 keyup,於輸入框打字時若不攔截,
+ *      輸入一個空格便會停止播放
  */
 
 import { addUserCorrection, isValidReading } from './corrections-store.js';
@@ -31,7 +31,7 @@ const PANEL_WIDTH = 320;
 
 let rootEl = null;
 let state = null; // { lineText, chars, selStart, selEnd }
-let guardKey = null; // index.js 傳進來的按鍵防護
+let guardKey = null; // index.js 傳入的按鍵防護
 let previewTimer = null;
 
 /* ------------------------------------------------------------ 畫面組裝 */
@@ -71,20 +71,20 @@ function q(selector) {
 }
 
 /**
- * 拖曳選取的起點;null 代表現在沒有在拖。
- * 放在模組層而不是 renderSource 裡面,是因為放開滑鼠的 mouseup 可能發生在
- * 面板外面(手滑出去了),那一下要由 document 收,兩邊得看同一個變數。
+ * 拖曳選取的起點;null 代表目前未在拖曳。
+ * 置於模組層而非 renderSource 內部,是因為放開滑鼠的 mouseup 可能發生於面板之外
+ * (游標滑出),該事件須由 document 接收,兩處必須看到同一個變數。
  */
 let dragAnchor = null;
 
 /**
- * 原文逐字排出來,已選的高亮。
+ * 將原文逐字排出,已選取者高亮。
  *
- * 兩種選法:點一下延伸/縮小範圍(適合微調),或是按著拖過去一次選一段
- * (適合「這四個字是一個詞」這種一眼就知道範圍的情況)。
+ * 提供兩種選法:點擊以延伸或縮小範圍(適合微調),或按住拖曳一次選取一段
+ * (適合「這四個字是一個詞」這類範圍一目了然的情況)。
  *
- * 節點只建一次,之後只改 aria-pressed —— 拖曳時每移動一個字就重建整排按鈕的話,
- * 滑鼠底下的元素會被換掉,mouseenter 會再觸發一次,變成自己餵自己。
+ * 節點僅建立一次,之後只更新 aria-pressed —— 若拖曳時每移動一個字便重建整排按鈕,
+ * 游標下方的元素會被替換,mouseenter 將再次觸發,形成自我循環。
  */
 function renderSource() {
   const container = q('.romaji-fix-source');
@@ -97,11 +97,11 @@ function renderSource() {
     button.textContent = char;
 
     button.addEventListener('mousedown', (event) => {
-      // 不要讓瀏覽器把面板裡的文字選起來,那會蓋掉我們自己的選取提示
+      // 避免瀏覽器將面板內的文字選取起來,那會蓋掉自訂的選取提示
       event.preventDefault();
-      // 只記起點,**不動選取範圍** —— 真的拖了才算拖曳。
-      // 在這裡就把範圍設成這一個字的話,底下「點旁邊的字延伸範圍」會失效:
-      // 每一下都先被重設成單一個字,再也延伸不出去。
+      // 僅記錄起點,不變更選取範圍 —— 實際拖曳才視為拖曳。
+      // 若在此即將範圍設為單一字,下方「點擊鄰近字以延伸範圍」將失效:
+      // 每一次按下都會先被重設為單一字,再也延伸不出去。
       dragAnchor = i;
     });
 
@@ -111,11 +111,11 @@ function renderSource() {
     });
 
     /*
-     * 點一下:延伸或縮小範圍(原本的行為)。
+     * 點擊:延伸或縮小範圍(既有行為)。
      *
-     * 跨了好幾個字的拖曳不會走到這裡 —— 按下與放開在不同元素上時,
-     * click 會派給共同的祖先而不是按鈕本身。原地按放才算點擊,那時
-     * 一次 mouseenter 都沒發生過,範圍還是原樣,extendSelection 的判斷才正確。
+     * 跨越數字的拖曳不會進入此處 —— 按下與放開位於不同元素時,
+     * click 會派送至共同祖先而非按鈕本身。原地按放才算點擊,
+     * 此時未曾發生 mouseenter,範圍維持原樣,extendSelection 的判斷方為正確。
      */
     button.addEventListener('click', () => {
       extendSelection(i);
@@ -129,7 +129,7 @@ function renderSource() {
   paintSelection();
 }
 
-/** 只更新哪些字是選中的,不動節點 */
+/** 僅更新哪些字為選取狀態,不變動節點 */
 function paintSelection() {
   if (!rootEl) return;
   const buttons = rootEl.querySelectorAll('.romaji-fix-ch');
@@ -139,14 +139,14 @@ function paintSelection() {
 }
 
 function setSelection(start, end) {
-  if (state.selStart === start && state.selEnd === end) return; // 沒變就不要重畫
+  if (state.selStart === start && state.selEnd === end) return; // 未變更則不重繪
   state.selStart = start;
   state.selEnd = end;
   paintSelection();
   schedulePreview();
 }
 
-/** 放開滑鼠就結束拖曳,不管放在哪裡 */
+/** 放開滑鼠即結束拖曳,不論放開的位置為何 */
 function endDrag() {
   dragAnchor = null;
 }
@@ -169,21 +169,21 @@ function schedulePreview() {
 }
 
 /**
- * 目前的選取範圍能不能補讀音。
+ * 目前的選取範圍是否可補讀音。
  *
- * 只選到疊字符(々 之類)是無效的 —— 它讀什麼完全看前面是什麼字,
- * 單獨指定一個讀音必定會弄壞其他所有含它的詞。詳見 cjk.js。
+ * 僅選到疊字符(々 之類)為無效 —— 其讀音完全取決於前一個字,
+ * 單獨指定讀音必然破壞其他所有含該符號的詞。詳見 cjk.js。
  *
- * @returns {string|null} 不能補時回傳要顯示的原因
+ * @returns {string|null} 不可補時回傳應顯示的原因
  */
 function selectionProblem() {
   /*
-   * 什麼都沒選中。
+   * 未選取任何內容。
    *
-   * 從「點紅色底線的字」進來時範圍是預先選好的,不會走到這裡;
-   * 但雙擊拼音進來時是空的 —— 那條路必須由使用者自己指出要修哪個詞,
-   * 因為拼音反推不回原文的哪一段(轉換不保留對應關係)。
-   * 沒有這道防線的話,空字串會被當成一筆讀音存進去。
+   * 由「點選紅色底線的字」進入時範圍已預先選好,不會走到此處;
+   * 但雙擊拼音進入時範圍為空 —— 該路徑必須由使用者自行指出要修改的詞,
+   * 因為拼音無法反推回原文的對應區段(轉換不保留對應關係)。
+   * 缺少此道防線時,空字串會被當作一筆讀音存入。
    */
   if (!selectedSurface()) {
     return '先點下面的原文,選出要修的那個詞';
@@ -198,32 +198,32 @@ async function runPreview() {
   if (!rootEl) return;
 
   /*
-   * 選取範圍本身有問題時,立刻講 —— 不要等到使用者填完讀音、
-   * 按了儲存才說不行。那時他已經在錯的方向上花了力氣。
+   * 選取範圍本身有問題時立即提示,不待使用者填完讀音、按下儲存才告知 ——
+   * 屆時他已在錯誤的方向上耗費心力。
    */
   const problem = selectionProblem();
   showError(problem);
 
-  // 使用者可能打的是羅馬拼音,先轉成假名再判斷
+  // 輸入可能為羅馬拼音,先轉為假名再行判斷
   const reading = toKanaReading(q('.romaji-fix-input').value);
   const surface = selectedSurface();
 
   /*
-   * 範圍有問題就**不要組出候選條目**。
+   * 範圍有問題時不組出候選條目。
    *
-   * 尤其是空的 surface:那會讓取代的迴圈永遠不前進,分頁當場 Out of Memory
-   * (雙擊開面板時範圍預設是空的,使用者一邊打字一邊預覽就會踩到)。
-   * corrections.js 那邊也擋了,但那是最後一道防線 ——
-   * 明知道這一筆不能用還餵下去,本來就沒有道理。
+   * 尤以空的 surface 為甚:那會使取代迴圈永不前進,分頁當場 Out of Memory
+   * (雙擊開啟面板時範圍預設為空,使用者一邊輸入一邊預覽即會觸發)。
+   * corrections.js 亦有防範,但那是最後一道防線 ——
+   * 明知該筆不可用仍傳入,本無道理。
    */
   const candidate = !problem && reading && isValidReading(reading) ? { surface, reading } : null;
 
-  // 把轉出來的假名顯示出來 —— 打羅馬拼音的人要看到它變成什麼,
-  // 否則轉錯了也不知道是哪一步出問題
+  // 顯示轉換後的假名 —— 輸入羅馬拼音者須看見其結果,
+  // 否則轉換有誤時無從得知是哪一步出問題
   q('.romaji-fix-kana').textContent = candidate ? reading : '';
 
   const result = await previewRomaji(state.lineText, candidate);
-  if (!rootEl) return; // 等待期間被關掉了
+  if (!rootEl) return; // 等待期間面板已關閉
 
   q('.romaji-fix-preview-text').textContent = result ?? '(轉不出來)';
 }
@@ -235,15 +235,15 @@ function showError(message) {
 /* -------------------------------------------------------------- 存檔 */
 
 async function save() {
-  // 選取範圍本身無效就不要存,存了會弄壞其他詞
+  // 選取範圍無效則不儲存,存入會破壞其他詞
   const problem = selectionProblem();
   if (problem) {
     showError(problem);
     return;
   }
 
-  // 跟預覽走同一條路:先轉假名再驗證。兩邊若不一致,
-  // 會出現「預覽看起來對、按儲存卻說格式錯」這種莫名其妙的狀況。
+  // 與預覽採同一路徑:先轉假名再驗證。兩處若不一致,
+  // 將出現「預覽看起來正確、按下儲存卻提示格式錯誤」的矛盾情形。
   const reading = toKanaReading(q('.romaji-fix-input').value);
 
   if (!isValidReading(reading)) {
@@ -258,10 +258,10 @@ async function save() {
   }
 
   /*
-   * 'write-failed' 最常見的原因是**寫入頻率**上限,不是空間不足 ——
-   * chrome.storage.sync 每分鐘只能寫約 120 次,超過之後所有寫入都會失敗。
-   * 只說「請再試一次」會讓使用者立刻再按一次、再失敗一次,更困惑。
-   * 講清楚要等一下,他才知道該怎麼做。
+   * 'write-failed' 最常見的成因是寫入頻率上限,而非空間不足 ——
+   * chrome.storage.sync 每分鐘僅能寫入約 120 次,超過之後所有寫入皆會失敗。
+   * 僅提示「請再試一次」會使使用者立即重按並再次失敗,更為困惑;
+   * 明確說明須稍候,他才知道該如何處置。
    */
   showError(
     result.reason === 'quota'
@@ -273,25 +273,25 @@ async function save() {
 /* ------------------------------------------------------ 分享給其他人 */
 
 /*
- * 專案的 issue 頁面。由 build.mjs 從 package.json 注入 —— 跟 LRCLIB 的
- * 來源識別同一個道理,不在程式裡寫死第二份網址。
+ * 專案的 issue 頁面。由 build.mjs 自 package.json 注入 ——
+ * 與 LRCLIB 的來源識別同理,不在程式中寫入第二份網址。
  */
 const REPO_URL =
   typeof __REPO_URL__ === 'string' ? __REPO_URL__ : '';
 
 /**
- * 把這一筆讀音開成一個預先填好的 GitHub issue。
+ * 將該筆讀音開成一個預先填好的 GitHub issue。
  *
- * ── 為什麼是開 issue,不是直接上傳 ────────────────────────────
- * 共用字典是所有使用者都會拿到的。如果誰都能直接寫進去,
- * 一筆錯的讀音就會讓所有人的畫面**很有自信地顯示錯的拼音** ——
- * 那比轉不出來更糟,因為沒有人看得出來它是錯的。
+ * ── 採開 issue 而非直接上傳的理由 ────────────────────────────
+ * 共用字典是所有使用者都會取得的。若任何人皆可直接寫入,
+ * 一筆錯誤的讀音便會使所有人的畫面以確信的樣態顯示錯誤的拼音 ——
+ * 那較轉換失敗更糟,因為無人看得出它是錯的。
  *
- * 開 issue 保留了「有人看過再合併」這一步,而預先填好內容讓使用者
- * 不需要懂 GitHub —— 他只要按送出。
+ * 開 issue 保留了「經人審閱再合併」這一步,而預先填好內容使使用者
+ * 毋須熟悉 GitHub —— 僅需按下送出。
  *
- * 完全不會自動送出任何東西:按下去只是開一個新分頁,
- * 內容長什麼樣他自己看得到,不想送就關掉。
+ * 不會自動送出任何內容:按下後僅開啟一個新分頁,
+ * 內容可自行檢視,不願送出即可關閉。
  */
 function shareCorrection() {
   if (!REPO_URL) {
@@ -301,7 +301,7 @@ function shareCorrection() {
 
   const problem = selectionProblem();
   if (problem) {
-    // 分享出去的東西所有人都會拿到,這裡更不能放行
+    // 分享出去的內容所有人都會取得,此處更不可放行
     showError(problem);
     return;
   }
@@ -315,15 +315,15 @@ function shareCorrection() {
   }
 
   /*
-   * 曲名自動帶進來,而且回報預設就是**限定這首歌**。
+   * 曲名自動帶入,且回報預設即為限定這首歌。
    *
-   * ── 為什麼不讓回報的人選「要不要全域生效」──────────────────
-   * 因為他判斷不了。「失 → な」在他這首歌是對的,全域生效卻會讓
-   * 失敗變成なはい —— 要判斷得先想過這個字在別的詞裡怎麼讀,
-   * 那等於這個功能只有懂日文的人能用。
+   * ── 不讓回報者選擇是否全域生效的理由 ──────────────────────
+   * 該判斷超出其能力範圍。「失 → な」在他這首歌是正確的,全域生效卻會使
+   * 失敗變成なはい —— 要作此判斷須先想過該字在其他詞中的讀法,
+   * 等於此功能僅有懂日文者能使用。
    *
-   * 所以回報的人只需要說「這首歌的這個詞唸這樣」,那是他**看得到**的事實;
-   * 要不要提升成通用條目由收 issue 的人決定,那才是需要判斷的部分。
+   * 因此回報者只需陳述「這首歌的這個詞唸這樣」,那是他看得到的事實;
+   * 是否提升為通用條目由處理 issue 者決定,那才是需要判斷的部分。
    */
   const body = [
     '<!-- 這是自動填好的,確認沒問題就直接送出 -->',
@@ -362,24 +362,18 @@ export function closeCorrectionPopover() {
 }
 
 /**
- * @param {object} options
- * @param {string} options.lineText 整行原文
- * @param {string} options.surface  偵測到轉不出來的那一段(預選範圍)
- * @param {DOMRect} options.anchor  點擊處,用來決定面板出現在哪
- * @param {(event: KeyboardEvent) => void} options.guardKeydown
- *        重用 index.js 的按鍵防護,避免在輸入框打空格時觸發 Spotify 播放/暫停
- */
-/**
- * 打開修正面板。
+ * 開啟修正面板。
  *
  * @param {object} options
- * @param {string} options.lineText 整句原文,選詞器就是把它逐字攤開
- * @param {string} options.surface 預先選好的範圍;空字串代表「讓使用者自己選」
- * @param {DOMRect} options.anchor 面板要貼在哪個位置下方
- * @param {Function} [options.guardKeydown] index.js 的按鍵防護
- * @param {string} [options.title] 標題。兩種進入點要講的事情不一樣 ——
- *   點紅底線的字是「這個詞讀不出來」,雙擊拼音是「這個詞讀錯了」。
- *   標題若一律寫「補上讀音」,後者會讓使用者以為自己點錯功能。
+ * @param {string} options.lineText 整句原文,選詞器即是將其逐字攤開
+ * @param {string} options.surface 預先選定的範圍;空字串代表由使用者自行選取
+ * @param {DOMRect} options.anchor 點擊處,面板將出現於其下方
+ * @param {Function} [options.guardKeydown] index.js 的按鍵防護,
+ *   避免在輸入框打空格時觸發 Spotify 的播放/暫停
+ * @param {string} [options.title] 標題。兩種進入點所要陳述的事情不同 ——
+ *   點選紅色底線的字是「這個詞讀不出來」,雙擊拼音是「這個詞讀錯了」。
+ *   標題若一律寫「補上讀音」,後者會使使用者誤以為點錯功能。
+ * @param {string} [options.songTitle] 曲名,分享時帶入 issue
  */
 export function openCorrectionPopover({
   lineText,
@@ -402,10 +396,10 @@ export function openCorrectionPopover({
   rootEl.querySelector('.romaji-fix-title').textContent = title;
   document.body.appendChild(rootEl);
 
-  // 拖到一半滑出面板外面才放開,也要算結束 —— 掛在 document 上才收得到
+  // 拖曳中游標滑出面板後才放開亦須視為結束 —— 掛於 document 才接收得到
   document.addEventListener('mouseup', endDrag, true);
 
-  // 放在點擊處下方,超出畫面就往回收
+  // 置於點擊處下方,超出畫面則往內收
   const left = Math.min(
     Math.max(8, anchor.left - PANEL_WIDTH / 2),
     window.innerWidth - PANEL_WIDTH - 8
@@ -421,8 +415,8 @@ export function openCorrectionPopover({
     schedulePreview();
   });
 
-  // 在捕獲階段擋下按鍵,不讓 Spotify 收到 —— 尤其是空白鍵(它的播放/暫停
-  // 綁在 keyup),否則使用者打一個空格音樂就停了
+  // 於捕獲階段攔下按鍵,不使 Spotify 收到 —— 尤以空白鍵為要
+  // (其播放/暫停綁在 keyup),否則輸入一個空格便會停止播放
   rootEl.addEventListener(
     'keydown',
     (event) => {
@@ -443,7 +437,7 @@ export function openCorrectionPopover({
   runPreview();
 }
 
-/** 點在面板外面就關掉。由 index.js 在既有的委派裡呼叫,不另外掛 listener。 */
+/** 點擊面板之外即關閉。由 index.js 於既有的事件委派中呼叫,不另掛 listener。 */
 export function handleOutsideClick(target) {
   if (!rootEl || rootEl.contains(target)) return false;
   closeCorrectionPopover();

@@ -1,26 +1,25 @@
 /**
  * lrc-panel.js
- * Spotify 沒有歌詞時,用 LRCLIB 的歌詞自己浮一個面板出來。
+ * Spotify 未提供歌詞時,以 LRCLIB 的歌詞另行浮出一個面板。
  *
- * 為什麼需要:有些歌 Spotify 根本不提供歌詞(授權沒談成、冷門曲目),
- * 這時原本的整條流程都沒有東西可以掛 —— 沒有歌詞行,就沒有拼音。
- * service worker 早就會去 LRCLIB 把歌詞抓回來了,只是先前沒有地方顯示。
+ * 必要性:部分歌曲 Spotify 根本不提供歌詞(授權未談成、冷門曲目),
+ * 此時整條流程無所依附 —— 沒有歌詞行即沒有拼音。
+ * service worker 本就會向 LRCLIB 取得歌詞,先前僅缺少顯示的位置。
  *
- * ── 這個面板刻意做的一個決定 ──────────────────────────────
- * 面板的每一行**做成跟 Spotify 歌詞行同構的元素**:
+ * ── 本面板刻意採取的一項決定 ──────────────────────────────
+ * 面板的每一行做成與 Spotify 歌詞行同構的元素:
  *
  *   <li data-romaji-source="原文">
  *     <span class="romaji-original">原文</span>
  *     <span class="romaji-overlay">…逐字 span…</span>
  *   </li>
  *
- * 這樣一來,顯示模式的 CSS、手動切分的點擊委派、補讀音面板、
- * 逐字掃描的 paintSweep —— 全部原封不動就能用在面板上,
- * 一行都不用為面板重寫。轉換本身也交還給 index.js 的既有佇列,
- * 這裡只負責「把行擺出來」跟「現在唱到哪」。
+ * 如此一來,顯示模式的 CSS、手動切分的點擊委派、補讀音面板、
+ * 逐字掃描的 paintSweep 皆可原封不動地套用於面板,毋須為面板重寫任何一行。
+ * 轉換本身亦交還 index.js 的既有佇列,此處僅負責排列行與標示目前唱到何處。
  *
- * 連手動切分都是共用的:key 是原始日文歌詞行,所以同一句歌詞
- * 在 Spotify 歌詞上切過的空格,在這個面板上也會直接生效。
+ * 手動切分同樣共用:其 key 為原始日文歌詞行,因此同一句歌詞在 Spotify
+ * 歌詞上切過的空格,於本面板亦直接生效。
  */
 
 import {
@@ -38,10 +37,10 @@ const PANEL_CLASS = 'romaji-lrc-panel';
 const LINE_CLASS = 'romaji-lrc-line';
 
 /**
- * 使用者自己捲動之後,先別跟他搶。
+ * 使用者自行捲動後的暫緩期間。
  *
- * 沒有這段的話,想往回看前面幾句是辦不到的 —— 每 80ms 的更新
- * 會立刻把畫面拉回正在唱的那一句,手感像是被面板甩開。
+ * 缺少此段時,無法往回檢視前幾句 —— 每 80ms 的更新會立即將畫面拉回
+ * 正在演唱的那一句,操作手感如同被面板甩開。
  */
 const USER_SCROLL_GRACE_MS = 4000;
 
@@ -49,9 +48,9 @@ let panelEl = null;
 let bodyEl = null;
 let lineEls = [];
 
-/** 跟 lineEls 一一對應的起始時間;沒有時間軸(只有純文字歌詞)時是 null */
+/** 與 lineEls 一一對應的起始時間;無時間軸(僅有純文字歌詞)時為 null */
 let times = null;
-/** 跟 lineEls 一一對應的逐字進度折線,沒有逐字資料的行是 null */
+/** 與 lineEls 一一對應的逐字進度折線,無逐字資料的行為 null */
 let curves = [];
 
 let lastActive = -1;
@@ -61,13 +60,12 @@ let onCloseCallback = null;
 /* -------------------------------------------------------------- 拖曳 */
 
 /*
- * 為什麼要能拖:面板固定在右上角,而 Chrome 的擴充功能設定視窗**一定**
- * 也在右上角(那是瀏覽器決定的,改不了)。兩個一定會疊在一起,
- * 使用者一開設定就看不到歌詞。
+ * 可拖曳的必要性:面板固定於右上角,而 Chrome 的擴充功能設定視窗必然亦位於右上角
+ * (由瀏覽器決定,無法變更)。兩者必定重疊,使用者一開啟設定即看不到歌詞。
  *
- * 為什麼不是「自動放到 Spotify 中間那塊」:那要靠猜它的版面結構,
- * 而這個擴充功能已經被 Spotify 改版打壞過一次。讓使用者自己放,
- * 不依賴任何選擇器,它改版幾次都不會壞。
+ * 不採「自動置於 Spotify 中央區塊」的理由:該作法須推測其版面結構,
+ * 而本擴充功能已因 Spotify 改版損壞過一次。由使用者自行擺放則不依賴任何選擇器,
+ * 對方改版數次亦不會失效。
  */
 
 const POSITION_KEY = 'lrcPanelPos';
@@ -77,12 +75,12 @@ let dragging = null;
 function enableDrag(panel, handle, closeButton) {
   handle.addEventListener('mousedown', (event) => {
     if (event.button !== 0 || closeButton.contains(event.target)) return;
-    event.preventDefault(); // 不要讓瀏覽器把標題文字選起來
+    event.preventDefault(); // 避免瀏覽器將標題文字選取起來
 
     const rect = panel.getBoundingClientRect();
     /*
-     * 面板原本是靠 top/right/bottom 撐出高度的。改用 left/top 定位之前,
-     * 必須先把高度固定下來 —— 否則 bottom 一放掉,面板會縮成標題列那麼高。
+     * 面板原以 top/right/bottom 撐出高度。改用 left/top 定位之前必須先固定高度,
+     * 否則 bottom 一經解除,面板會縮至僅剩標題列的高度。
      */
     panel.style.height = `${rect.height}px`;
     panel.style.right = 'auto';
@@ -116,9 +114,9 @@ function onDragEnd() {
 }
 
 /**
- * 記住位置與大小。
+ * 記錄位置與大小。
  *
- * 存不進去也沒關係 —— 下次回到預設位置而已,不值得打擾使用者。
+ * 寫入失敗亦無妨 —— 至多是下次回到預設位置,不值得打擾使用者。
  */
 let saveTimer = null;
 function saveLayout() {
@@ -132,9 +130,9 @@ function saveLayout() {
   };
 
   /*
-   * 節流。拉伸的時候 ResizeObserver 每一幀都會叫一次,
-   * 一次拖曳就是上百次寫入 —— storage 有寫入頻率上限,
-   * 灌爆之後**其他功能的儲存也會一起失敗**(自訂讀音就是這樣壞過一次)。
+   * 節流。拉伸時 ResizeObserver 每一幀觸發一次,單次拖曳即產生上百次寫入 ——
+   * storage 有寫入頻率上限,一旦灌爆,其他功能的儲存亦會一併失敗
+   * (自訂讀音即曾因此損壞)。
    */
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
@@ -143,13 +141,13 @@ function saveLayout() {
 }
 
 /*
- * 掛在 document 上而不是面板上:放開滑鼠的時候游標常常已經離開面板了
- * (拖得比較快的時候),掛在面板上會收不到那一下,面板就黏在游標上。
+ * 掛於 document 而非面板:放開滑鼠時游標常已離開面板(拖曳較快時),
+ * 掛於面板將接收不到該事件,面板便會黏在游標上。
  */
 document.addEventListener('mousemove', onDragMove);
 document.addEventListener('mouseup', onDragEnd);
 
-/** 視窗變小時,把面板拉回看得到的地方 */
+/** 視窗縮小時將面板拉回可見範圍 */
 window.addEventListener('resize', () => {
   if (!panelEl || panelEl.style.left === '') return;
   const rect = panelEl.getBoundingClientRect();
@@ -163,22 +161,22 @@ window.addEventListener('resize', () => {
 });
 
 /**
- * 盯著面板被拉大縮小。
+ * 監看面板的尺寸變化。
  *
- * 用 ResizeObserver 而不是聽某個事件:右下角的拉伸把手是瀏覽器內建的,
- * 它不會發出任何我們攔得到的事件 —— 只看得到「大小變了」這個結果。
+ * 採 ResizeObserver 而非監聽事件:右下角的拉伸把手為瀏覽器內建,
+ * 不會發出任何可攔截的事件 —— 僅能觀察到「大小已變更」這一結果。
  */
 let sizeObserver = null;
 function watchResize(panel) {
   sizeObserver?.disconnect();
   sizeObserver = new ResizeObserver(() => {
-    // 拖曳中不要存:那時候位置每一幀都在變,等放開再存一次就好
+    // 拖曳期間不儲存:該時段位置每一幀皆在變動,待放開後儲存一次即可
     if (!dragging) saveLayout();
   });
   sizeObserver.observe(panel);
 }
 
-/** 還原上次拖到的位置與大小。沒存過就維持 CSS 的預設值。 */
+/** 還原上次拖曳後的位置與大小。未曾儲存則沿用 CSS 的預設值。 */
 async function restorePosition(panel) {
   try {
     const stored = await chrome.storage.local.get(POSITION_KEY);
@@ -186,11 +184,11 @@ async function restorePosition(panel) {
     if (!saved || !Number.isFinite(saved.left) || !Number.isFinite(saved.top)) return;
 
     const rect = panel.getBoundingClientRect();
-    // 舊版的紀錄沒有 width,少了就沿用目前的,不要整筆丟掉
+    // 舊版紀錄不含 width,缺少時沿用目前值,不整筆捨棄
     const width = Number.isFinite(saved.width) ? saved.width : rect.width;
     const height = Number.isFinite(saved.height) ? saved.height : rect.height;
 
-    // 存的時候畫面可能比現在大,所以還原時要再夾一次
+    // 儲存當下的畫面可能大於現在,故還原時須再行夾限
     const next = clampToViewport(
       { left: saved.left, top: saved.top },
       { width, height },
@@ -204,7 +202,7 @@ async function restorePosition(panel) {
     panel.style.left = `${next.left}px`;
     panel.style.top = `${next.top}px`;
   } catch {
-    // 讀不到就用預設位置,不是值得中斷的事
+    // 讀取失敗即採預設位置,不足以中斷流程
   }
 }
 
@@ -250,9 +248,8 @@ function buildShell(title, subtitle) {
   body.className = 'romaji-lrc-body';
 
   /*
-   * 捲動事件分不出「使用者捲的」跟「我們自己捲的」,
-   * 所以自動捲動時會先把 userScrolledAt 往回撥(見 scrollToActive),
-   * 這裡收到的就只剩下真的是使用者操作的那些。
+   * scroll 事件無法區分使用者捲動與程式捲動,因此自動捲動時會先將
+   * userScrolledAt 往回撥(見 scrollToActive),此處收到的便僅剩真正的使用者操作。
    */
   body.addEventListener(
     'scroll',
@@ -267,17 +264,17 @@ function buildShell(title, subtitle) {
 }
 
 /**
- * 把一行歌詞做成 <li>。
+ * 將一行歌詞建成 <li>。
  *
- * 刻意只放**純文字**,不在這裡做轉換 —— 拼音是由 index.js 的佇列
- * 統一處理的(它會 ensureOriginalWrapper 把文字包進 .romaji-original,
- * 再把拼音填進 .romaji-overlay)。同一套流程處理兩種來源,
- * 就不會出現「Spotify 那邊修好了、面板這邊還是舊行為」。
+ * 刻意僅置入純文字而不在此進行轉換 —— 拼音由 index.js 的佇列統一處理
+ * (其會以 ensureOriginalWrapper 將文字包入 .romaji-original,
+ * 再將拼音填入 .romaji-overlay)。兩種來源共用同一套流程,
+ * 即不致出現「Spotify 側已修好、面板側仍為舊行為」的情形。
  */
 function buildLine(text) {
   const li = document.createElement('li');
   li.className = LINE_CLASS;
-  // 間奏行(只有時間沒有文字)要留著佔位,否則高亮會卡在上一句
+  // 間奏行(僅有時間而無文字)須保留以佔位,否則高亮會停滯於上一句
   li.textContent = text || '';
   return li;
 }
@@ -285,17 +282,17 @@ function buildLine(text) {
 /* ------------------------------------------------------------ 對外介面 */
 
 /**
- * 打開面板。重複呼叫會整個重建(換歌時就是這樣)。
+ * 開啟面板。重複呼叫會整個重建(換歌時即為如此)。
  *
  * @param {object} options
  * @param {string} options.title    面板標題(曲名)
- * @param {string} options.subtitle 副標(歌手 + 來源)
+ * @param {string} options.subtitle 副標(歌手與來源)
  * @param {Array<{timeMs:number,text:string,words?:Array}>|null} options.timed
- *        有時間軸的歌詞。有這個才做得出高亮與逐字掃描。
+ *        有時間軸的歌詞。高亮與逐字掃描僅在具備此項時成立。
  * @param {string[]|null} options.plain
- *        只有純文字的歌詞。沒有時間軸時的退路,只顯示不高亮。
- * @param {() => void} [options.onClose] 使用者按叉叉時的回呼
- * @returns {HTMLElement[]} 建好的行元素,呼叫端要把它們送進轉換佇列
+ *        僅有純文字的歌詞。無時間軸時的退路,只顯示而不高亮。
+ * @param {() => void} [options.onClose] 使用者按下關閉時的回呼
+ * @returns {HTMLElement[]} 已建立的行元素,呼叫端須將其送入轉換佇列
  */
 export function openLrcPanel({ title, subtitle, timed, plain, onClose }) {
   closeLrcPanel();
@@ -321,8 +318,8 @@ export function openLrcPanel({ title, subtitle, timed, plain, onClose }) {
   userScrolledAt = 0;
 
   document.body.appendChild(panelEl);
-  // 位置是非同步讀回來的,所以面板會先出現在預設位置再跳過去 ——
-  // 那一下比「等讀完才顯示」好:歌詞晚出現才是使用者真的在意的事
+  // 位置為非同步讀取,面板會先出現於預設位置再移至記錄的位置。
+  // 該次跳動優於「待讀取完成才顯示」:歌詞延遲出現才是使用者真正在意的事
   restorePosition(panelEl);
   watchResize(panelEl);
 
@@ -338,7 +335,7 @@ export function openLrcPanel({ title, subtitle, timed, plain, onClose }) {
 }
 
 export function closeLrcPanel() {
-  // 面板都要移除了,還盯著它看只是留一個沒人管的觀察者
+  // 面板即將移除,繼續監看只會留下無人管理的觀察者
   sizeObserver?.disconnect();
   sizeObserver = null;
   clearTimeout(saveTimer);
@@ -357,26 +354,26 @@ export function isLrcPanelOpen() {
   return panelEl !== null;
 }
 
-/** 面板上的行元素。index.js 的佇列要拿它來決定先轉哪一行。 */
+/** 面板上的行元素。index.js 的佇列依此決定先轉換哪一行。 */
 export function getPanelLineElements() {
   return lineEls;
 }
 
 /**
- * 面板被頁面重建洗掉時重新掛回去。
+ * 面板遭頁面重建移除時重新掛回。
  *
- * Spotify 是 React SPA,理論上不會動到我們 append 在 body 最後的元素,
- * 但它換頁時確實有整批清理的動作。每秒確認一次很便宜,
- * 而萬一真的掉了卻不補,使用者看到的就是「面板莫名其妙消失」。
+ * Spotify 為 React SPA,理論上不會動到 append 於 body 末端的元素,
+ * 但其換頁時確有整批清理的動作。每秒確認一次的成本低廉,
+ * 而若確實遭移除卻未補回,使用者所見即為面板無故消失。
  */
 export function ensurePanelAttached() {
   if (panelEl && !panelEl.isConnected) document.body.appendChild(panelEl);
 }
 
 /**
- * 更新「現在唱到哪一行、唱到哪個字」。
+ * 更新目前演唱的行與行內進度。
  *
- * @param {number|null} positionMs 已經套用過提前量的播放位置
+ * @param {number|null} positionMs 已套用提前量的播放位置
  * @param {{ sweepMsPerLetter?: number, spanFactor?: number }} [options]
  */
 export function updateLrcPanel(positionMs, options = {}) {
@@ -417,7 +414,7 @@ export function updateLrcPanel(positionMs, options = {}) {
 
 /* ------------------------------------------------------------------ 內部 */
 
-/** 這一句唱到什麼時候結束(下一句開始)。最後一句沒有下一句就給個合理長度。 */
+/** 此句結束的時間,即下一句開始的時間。最後一句沒有下一句,給予一個合理長度。 */
 function nextTimeAfter(index) {
   for (let i = index + 1; i < times.length; i += 1) {
     if (times[i] !== null) return times[i];
@@ -431,27 +428,27 @@ function countLetters(lineEl) {
 }
 
 /**
- * 把正在唱的那一句捲到面板中間偏上的位置。
+ * 將正在演唱的那一句捲至面板中央偏上的位置。
  *
- * 為什麼是偏上而不是正中間:跟唱的人要看的是**接下來**幾句,
- * 已經唱過的留一兩行當定位參考就夠了。
+ * 採偏上而非正中央:跟唱者需要看的是接下來幾句,
+ * 已唱過的保留一兩行作為定位參考即已足夠。
  */
 function scrollToActive(lineEl) {
   if (!bodyEl || !lineEl) return;
 
-  // 使用者剛剛自己捲過就先不要搶,等他停手一段時間
+  // 使用者方才自行捲動時暫不介入,待其停手一段時間後再接手
   if (performance.now() - userScrolledAt < USER_SCROLL_GRACE_MS) return;
 
   const target = lineEl.offsetTop - bodyEl.clientHeight * 0.38;
   const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   /*
-   * 先把「使用者捲動」的時間戳往回撥,再自己捲。
+   * 先將「使用者捲動」的時間戳往回撥,再自行捲動。
    *
-   * scroll 事件分不出來源,不做這件事的話我們自己捲的每一下
-   * 都會被當成使用者操作記下來,自動捲動就會在第一次之後永遠停擺。
-   * 往回撥而不是設旗標,是因為平滑捲動會分很多幀送出事件,
-   * 旗標很難決定什麼時候該放下來。
+   * scroll 事件無法區分來源,若不作此處理,程式自身的每一次捲動
+   * 皆會被記為使用者操作,自動捲動便會在第一次之後永久停擺。
+   * 採往回撥而非設立旗標,是因為平滑捲動會分散於多幀送出事件,
+   * 旗標難以決定何時該解除。
    */
   userScrolledAt = -USER_SCROLL_GRACE_MS;
 
