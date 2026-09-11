@@ -43,25 +43,8 @@ Spotify 未提供歌詞的曲目改由 [LRCLIB](https://lrclib.net) 取得,以�
 
 ## 安裝
 
-正在 Chrome 線上應用程式商店審查中,通過後於此處提供安裝連結。
-
-<details>
-<summary>自行打包安裝(需 Node.js)</summary>
-
-```bash
-git clone https://github.com/psgo555/romaji-lyrics-extension.git
-cd romaji-lyrics-extension
-npm install
-npm run build
-```
-
-開啟 `chrome://extensions`,啟用開發人員模式,點選「載入未封裝項目」並選擇 `dist/`。
-
-</details>
-
-需求:電腦版 Chrome 或其他 Chromium 核心瀏覽器,以及 Spotify 網頁版 `open.spotify.com`。
-
-安裝檔約 15 MB,其中多數為日文斷詞辭典。辭典隨擴充功能內建,轉換於本機執行。
+在 Chrome 線上應用程式商店
+https://chromewebstore.google.com/detail/%E6%97%A5%E6%96%87%E6%AD%8C%E8%A9%9E%E7%BE%85%E9%A6%AC%E6%8B%BC%E9%9F%B3/nmjegopgfpebjfmbkhejkdpbjkkfaeee
 
 ## 使用方式
 
