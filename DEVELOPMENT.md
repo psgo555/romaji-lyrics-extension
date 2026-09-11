@@ -7,7 +7,7 @@
 ```bash
 npm install
 npm run build          # 打包至 dist/
-npm test               # 180 項純函式測試
+npm test               # 201 項純函式測試
 ```
 
 於 `chrome://extensions` 啟用開發人員模式,點選「載入未封裝項目」並選擇 `dist/`。
@@ -22,6 +22,7 @@ npm test               # 180 項純函式測試
 | 轉換結果不正確 | 讀音修正字典、使用者自訂讀音、長音符處理 |
 | 高亮時機、逐字掃描 | 同步高亮、掃描速度 |
 | Spotify 改版導致失效 | 關鍵 DOM 選擇器 |
+| YouTube Music | YouTube Music 支援 |
 | 畫面互動 | 手動斷字、平假名模式、LRCLIB 面板、設定介面 |
 | 提交前 | 驗證項目 |
 
@@ -32,7 +33,7 @@ npm test               # 180 項純函式測試
 | 項目 | 內容 |
 |---|---|
 | 形式 | Chrome Extension(Manifest V3) |
-| 平台 | Spotify 網頁版 `open.spotify.com` |
+| 平台 | Spotify 網頁版 `open.spotify.com`;YouTube Music 網頁版 `music.youtube.com`(Phase 1,僅顯示拼音) |
 | 轉換 | kuroshiro + kuroshiro-analyzer-kuromoji(漢字 → 假名 → 羅馬拼音) |
 | 歌詞來源 | 優先讀取 Spotify 頁面 DOM;無歌詞時改用 LRCLIB API |
 
@@ -65,6 +66,7 @@ src/content/
   splitter.js                   手動斷字的資料模型與渲染
   toggle-button.js              播放列上的顯示方式切換鈕
   lrc-panel.js                  LRCLIB 歌詞浮動面板
+  ytmusic-lyrics.js             YouTube Music 歌詞分頁的逐句拆解與掛載
   drag-bounds.js                面板位置的邊界夾制
   notice.js                     畫面角落的暫時提示
   overlay.css                   拼音外觀、顯示模式、面板樣式
@@ -74,6 +76,7 @@ src/background/
 
 src/popup/                      設定介面
 tools/                          開發工具(見下)
+docs/                           規劃文件
 legacy/                         早期驗證腳本,僅作紀錄
 dist/                           打包產物,「載入未封裝項目」須選此目錄
 ```
@@ -412,6 +415,66 @@ document.querySelector('[data-testid="lyrics-line"]').innerHTML;
 
 容器的 class 名稱含 "paywall" 字樣,部分帳號類型可能無法顯示歌詞面板。
 
+## YouTube Music 支援
+
+目前為 Phase 1:偵測歌詞分頁、拆成逐句、插入拼音,四種顯示模式、手動斷字與修正面板皆可使用。**不做**同步高亮、時間軸與 LRCLIB 備援。規劃見 `docs/youtube-music-support-plan.md`。
+
+### 實測結論(2026-09,headless Chrome,未登入)
+
+測試曲目:夜に駆ける、Lemon、Idol、群青、ただ声一つ、紅蓮華、好きだから。、灰色と青、うっせぇわ 等 11 首,皆有歌詞,結構完全相同。
+
+```
+歌詞 shelf:   ytmusic-description-shelf-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"]
+  div.wrapper
+    button[hidden] > yt-formatted-string.description     可展開版,YouTube Music 自行隱藏
+    yt-formatted-string.non-expandable.description       實際顯示的本文(單一文字節點)
+    yt-formatted-string.footer                           「提供元: Musixmatch」等來源標示
+曲名:         ytmusic-player-bar .title
+歌手:         ytmusic-player-bar .byline a[href^="channel/"]
+```
+
+| 觀察 | 影響 |
+|---|---|
+| 本文為單一文字節點,`childElementCount` 為 0,無逐句元素 | 須自行拆解(`splitLyricsText`) |
+| 換行不一定是 `\n`:LyricFind 來源(Lemon、紅蓮華)為 `\r\n` | 以 `/\r\n\|\r\|\n/` 切分。殘留的 `\r` 會進入手動斷字的 key |
+| 來源為 Musixmatch 或 LyricFind,結構相同 | 不依來源分支 |
+| 未點開「歌詞」分頁前 shelf 不存在;點開後切回其他分頁仍留在 DOM | 以既有的 body observer 加每秒掃描即可偵測,無須另外監聽屬性 |
+| 換歌時 shelf 與 `yt-formatted-string` 為同一元素,僅文字節點被替換(childList,非 characterData) | 以原生文字比對判斷換歌;於其旁插入的元素換歌後仍存在 |
+| 本文有兩份,class 皆含 `description`、內容相同;第一個符合者是 button 內**已被隱藏**的那份 | 讀取 `.non-expandable` 並接在其後;兩份皆標記隱藏。只處理第一份時,實際顯示的那份會留在自建的行下方,畫面出現兩份歌詞(首版即犯此錯,由端對端測試量到 shelf 高度多出一份才發現) |
+| 視窗寬度 720px、換歌後,兩份的可見性不變 | 目前無須依版面切換;兩份皆隱藏以防日後對調 |
+| 廣告播放時播放列顯示廣告名稱,byline 無任何連結 | 歌手僅認 `channel/` 連結,無歌手即不視為一首歌 |
+| 無歌詞的曲目(例如 MV 版本)「歌詞」分頁為 disabled | 不會產生 shelf,不需處理 |
+| 未見逐句同步的歌詞版本 | 未登入狀態下無法排除,Phase 2 開工前應以登入帳號再測 |
+
+### 設計
+
+- **原生本文只隱藏、不清空。** 換歌時 YouTube Music 替換的是原生元素內的文字節點,若該節點已被清空或搬走,更新會落空或與拆出的行相互干擾。改為在實際顯示的那份之後另建容器(來源標示因此仍緊接在歌詞下方),兩份原生本文皆以 `data-romaji-ytm-native` 加 CSS 隱藏;關閉模式下反過來顯示原生、隱藏自建的容器
+- **退回可展開版時插在 button 之後。** 按鈕內的文字無法以滑鼠選取,修正面板的預選會失效
+- **行與 LRCLIB 面板同構**(僅含純文字的 `div`),轉換、顯示模式、手動斷字、修正面板皆沿用 `index.js` 既有流程,手動斷字的 key 同為原文,與 Spotify 共用
+- **空行不成為一句**,改標記於下一句的 `data-romaji-paragraph`,段距由 CSS 決定
+- **純拼音模式不淡化。** 該模式將未演唱的行壓暗至 0.32,前提是有一行亮起;Phase 1 無高亮,不覆蓋則整份歌詞皆為暗色
+- **同一支 content script,以 `ON_YTMUSIC` 分流。** 轉換佇列與互動邏輯皆在 `index.js`,拆成兩個進入點須先將其抽出或複製。略過的部分:`markActive`(無高亮可觀察,會隨機亮起畫面中央的行)、`playback-clock.js`(Spotify 專用的估算;YouTube Music 可直接讀取 `#movie_player.getCurrentTime()`)、`tick()` 中的 LRCLIB 備援判斷
+
+### 端對端驗證
+
+Phase 1 以 headless Edge 載入 `dist/`、透過 DevTools Protocol 操作實際頁面驗證:四種模式、換歌、關閉期間換歌後開回、點擊進入斷字與空白鍵(不觸發 YouTube Music 的播放/暫停)、雙擊開啟修正面板。關鍵檢查為「可見的原生本文份數」:拼音模式須為 0、關閉模式須為 1。
+
+兩項環境限制:
+
+- **Chrome 正式版會忽略 `--load-extension`**,擴充功能不會載入,亦無任何錯誤。辨認方式是尋找本擴充功能的 `service-worker.js`(連字號);瀏覽器內建元件也有一個 `service_worker.js`,比對過寬會誤判為已載入
+- **Edge 會自動以 Windows 的 Microsoft 帳號登入新 profile 並開啟同步**,須加 `--disable-sync`。否則 `chrome.storage.sync` 會跨測試回合互相覆寫(上一回合結束時的顯示模式會在下一回合中途同步回來),瀏覽紀錄亦會進入使用者帳號
+
+### 失效時的排查
+
+```js
+// 各份本文的位置、可見性與內容(應為:button 內一份不可見、non-expandable 一份可見)
+const s = document.querySelector('ytmusic-description-shelf-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"]');
+[...(s?.querySelectorAll('yt-formatted-string') ?? [])].map((e) =>
+  [e.parentElement.tagName, e.className, e.checkVisibility(), e.childElementCount, e.textContent.slice(0, 20)]);
+```
+
+以擴充功能開啟時,兩份本文皆會帶 `data-romaji-ytm-native` 而不可見;若 shelf 下方仍看得到一份日文原文,即表示其中一份未被標記。
+
 ## 同步高亮
 
 高亮不由觀察 Spotify 畫面推斷。該方式先天延遲,且無法取得句子內部的進度。改以播放時間推算:
@@ -452,12 +515,12 @@ LRCLIB 與畫面歌詞的比對低於 50%(版本不同、Live 版)即整組放�
 每次改動均須執行下列三項,順序不可調換:
 
 ```bash
-npm test               # 純函式測試(180 項)
+npm test               # 純函式測試(201 項)
 npm run check:imports  # 遺漏 import 的靜態掃描
 npm run build          # src/ → dist/
 ```
 
-隨後於 `chrome://extensions` 重新載入擴充功能,並於 Spotify 分頁執行 `Ctrl+Shift+R`。
+隨後於 `chrome://extensions` 重新載入擴充功能,並於 Spotify 或 YouTube Music 分頁執行 `Ctrl+Shift+R`。
 
 最後一步不可省略:重新載入擴充功能會終止既有分頁中的 content script,而 Chrome 不會自動注入新的執行個體。省略時的症狀為完全無 `[romaji]` 訊息,亦無錯誤。
 
@@ -493,6 +556,7 @@ esbuild 對未定義的全域識別字不報錯,建置階段無法攔截。以 v
 | `auto-scroll.test.js` | 捲動距離計算 |
 | `shared-dictionary.test.js` | 共用字典驗證,含限定單曲的條目 |
 | `apply-reading.test.js` | issue 內容解析、寫入字典、以驗證器覆核 |
+| `ytmusic-lyrics.test.js` | YouTube Music 歌詞拆解(`\r\n`、段落、空白)、曲目判定(廣告不算) |
 
 測試本身以注入已知錯誤的方式驗證過:
 
@@ -512,7 +576,9 @@ esbuild 對未定義的全域識別字不報錯,建置階段無法攔截。以 v
 
 - **`chrome.storage.local` 的手動斷字資料無上限亦無過期機制**(`split:` 前綴)。實測 26 筆連同歌詞快取約 277KB,距上限尚遠,但僅增不減。可考慮加入 LRU 或過期機制,並於設定介面提供清除入口(自訂讀音已有管理清單,斷字尚無)
 - **LRCLIB 快取僅於讀取時檢查過期**,未再播放的曲目記錄會持續保留
-- **平台相關的選擇器分散於 `index.js` 與 `playback-clock.js`**。抽出為設定檔後,新增其他平台僅需增加對應檔案
+- **Spotify 的選擇器分散於 `index.js`、`playback-clock.js`、`toggle-button.js`**。YouTube Music 已集中於 `ytmusic-lyrics.js`,Spotify 尚未比照
+- **YouTube Music 播放列尚無切換鈕**,顯示方式僅能於設定介面切換。`toggle-button.js` 的錨點為 Spotify 的歌詞按鈕
+- **YouTube Music Phase 2**:以 `#movie_player.getCurrentTime()` 做同步高亮;開工前先以登入帳號確認是否有逐句同步的歌詞版本
 - 專案尚無 linter 與 formatter
 
 > 加入功能後應同步移除此處對應項目。過期的待辦清單較無清單更糟,會使閱讀者誤判功能不存在而重複實作。

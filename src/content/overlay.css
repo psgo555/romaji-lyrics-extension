@@ -870,3 +870,51 @@ html[data-romaji-mode='off'] .romaji-overlay {
     transition: none;
   }
 }
+
+/* ------------------------------------------------ YouTube Music 歌詞分頁 */
+
+/*
+ * YouTube Music 的歌詞整段位於一個文字節點中(見 ytmusic-lyrics.js),
+ * 本擴充功能在其後方另建一份逐句的行,原生本文僅隱藏、不刪除 ——
+ * 換歌時 YouTube Music 會替換原生元素裡的文字節點,留著它才不會與之衝突。
+ * 原生本文有兩份(可展開版與實際顯示的 non-expandable),兩份皆帶此標記。
+ *
+ * 關閉模式下反過來:顯示原生、隱藏自建的那一份。與 Spotify 的「只顯示原文」一致,
+ * 且關閉期間換了歌也不會看到上一首殘留的行(關閉時不會重建)。
+ * 此時兩份原生本文何者可見交還 YouTube Music 自己決定。
+ *
+ * !important 的原因:被隱藏的是 YouTube Music 自己的 yt-formatted-string,其 display
+ * 由它的樣式表決定,特異性無從得知。這條規則輸了,畫面上就會有兩份歌詞。
+ */
+html:not([data-romaji-mode='off']) [data-romaji-ytm-native] {
+  display: none !important;
+}
+
+html[data-romaji-mode='off'] .romaji-ytm-lyrics {
+  display: none;
+}
+
+/*
+ * 段落之間拉開距離。空行在拆解時已被丟棄(理由見 splitLyricsText),
+ * 段落改以下一句的 data-romaji-paragraph 標示。
+ */
+.romaji-ytm-line[data-romaji-paragraph='start'] {
+  margin-top: 1.1em;
+}
+
+/* 純拼音模式每行本有 0.5em 的上間距((0,2,1)),段落開頭須另外加大才看得出分段 */
+html[data-romaji-mode='romaji-only'] .romaji-ytm-line[data-romaji-paragraph='start'][data-romaji-processed] {
+  margin-top: 1.6em;
+}
+
+/*
+ * 純拼音模式不淡化。
+ *
+ * 上方「未在演唱的行」將拼音壓到 0.32,前提是有一行正在演唱並亮起。
+ * YouTube Music 目前沒有高亮(Phase 1),沒有任何一行會亮 ——
+ * 不覆蓋的話整份歌詞都是暗的,看起來像是整片失效。
+ * 特異性 (0,4,1) 高於被覆蓋的 (0,3,1)。
+ */
+html[data-romaji-mode='romaji-only'] .romaji-ytm-line[data-romaji-processed] .romaji-overlay {
+  opacity: 1;
+}
