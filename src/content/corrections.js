@@ -9,7 +9,8 @@
  * 本表列出目前已知會被讀錯的詞:surface 為原文(漢字),reading 為正確讀音(平假名)。
  *
  * 原理:送入 kuroshiro 轉換前,先將這些詞以字串替換為正確的平假名讀音。
- * kuroshiro 對已是平假名的部分不會重新判斷讀音,而是直接經 wanakana 轉為羅馬拼音,
+ * 平假名沒有讀法可供誤判 —— kuromoji 斷詞後的讀音即為字面本身,kuroshiro 再以其內建的
+ * 轉寫表(util.js 的 toRawRomaji,並非 wanakana)轉為羅馬拼音。
  * 替換因而可繞過 kuromoji 的誤判,無須改動 kuromoji 內部字典。
  *
  * 新增條目:於 CORRECTIONS 陣列加入一筆即可,無須自行排序 —— 下方會依原文長度
