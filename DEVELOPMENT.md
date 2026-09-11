@@ -7,7 +7,7 @@
 ```bash
 npm install
 npm run build          # 打包至 dist/
-npm test               # 201 項純函式測試
+npm test               # 211 項純函式測試
 ```
 
 於 `chrome://extensions` 啟用開發人員模式,點選「載入未封裝項目」並選擇 `dist/`。
@@ -19,7 +19,7 @@ npm test               # 201 項純函式測試
 | 修改範圍 | 相關章節 |
 |---|---|
 | 整體架構 | 技術方案、專案結構 |
-| 轉換結果不正確 | 讀音修正字典、使用者自訂讀音、長音符處理 |
+| 轉換結果不正確 | 讀音修正字典、使用者自訂讀音、長音符處理、促音與斷詞邊界 |
 | 高亮時機、逐字掃描 | 同步高亮、掃描速度 |
 | Spotify 改版導致失效 | 關鍵 DOM 選擇器 |
 | YouTube Music | YouTube Music 支援 |
@@ -52,6 +52,7 @@ src/content/
   romaji.js                     kuroshiro 初始化與轉換(含結果快取)
   numbers.js                    阿拉伯數字轉漢字數字(轉換前處理)
   macron.js                     長音符處理(romaji.js 與 splitter.js 共用)
+  sokuon.js                     促音落在斷詞邊界時的 token 合併
   cjk.js                        日文字元判定、未轉換字的偵測
   reading.js                    讀音格式驗證與羅馬拼音轉假名
   corrections.js                內建讀音修正字典(純邏輯,不相依 chrome)
@@ -140,6 +141,32 @@ kuroshiro 預設採 Hepburn 式,長音標為 `ō` / `ē`(macron)。畫面上呈�
 `stripMacrons()` 因此獨立為 `macron.js`:`romaji.js` 產生資料、`splitter.js` 比對既有資料,兩者必須使用同一套規則。分別實作會導致其中一方變更時,既有斷字全數失效且不會拋出錯誤。該模組不 import 任何項目,亦無模組層級副作用,`splitter.js` 引用時不會連帶載入 kuroshiro。
 
 > 排查紀錄:此問題最初被誤判為 CSS 造成。border、outline、box-shadow、background、偽元素與繼承的 `text-decoration` 均為 `none`。關鍵線索是所有異常樣本皆含長音母音。檢視樣式表之前,先比對異常樣本的共同特徵較有效率。
+
+## 促音與斷詞邊界
+
+kuroshiro 的 spaced 模式逐 token 轉換、以空格相接。促音(っ / ッ)若位於 token 尾端,與下一個字的子音分屬兩次轉換,無法合併為重複子音,被單獨轉為 `tsu`:`だった` → `datsu ta`、`言葉にできなかった` → `kotoba ni deki nakatsu ta`。
+
+kuroshiro 的 `patchTokens` 已有同樣的修補,但只套用於動詞與形容詞。`分かっ|た` 因此正確,助動詞的 `だっ|た`、`なかっ|た`、`たかっ|た` 則不在其列。
+
+`sokuon.js` 的 `withSokuonMerge()` 包裝形態素分析器,在 kuroshiro 取得 token 之前,將以促音結尾的 token 併入下一個 token(條件:下一個以假名開頭、兩者皆有讀音與發音)。kuroshiro 只要求分析器具備 `init()` 與 `parse()`,毋須修改其原始碼。
+
+### 未採用的作法
+
+曾評估改為「先轉平假名、移除促音後的空格、再以 wanakana 轉拼音」。81 行歌詞比對下,促音的 13 行修好,但另有 33 行原本正確的輸出被改壞:
+
+| 類別 | 修改前 | 經 wanakana |
+|---|---|---|
+| 助詞 | `kimi wa`、`kokoro o`、`higashi e` | `kimi ha`、`kokoro wo`、`higashi he` |
+| 長音 | `kyo`、`yo ni`、`somato` | `kyou`、`you ni`、`soumatou` |
+| 片假名 | `fensu`、`baiorin` | `fyensu`、`vuaiorin` |
+
+原因是 kuroshiro 的拼音取自 token 的**發音**(は→ワ→wa、よう→ヨー→yō),平假名輸出則是**讀音**。發音資訊捨棄後即無從補回。現行作法只改變斷詞,同一批比對中僅那 13 行改變,其餘 68 行完全相同。
+
+### 影響範圍
+
+- 平假名模式共用同一個分析器,`だっ た` 同樣成為 `だった`
+- 受影響的行其拼音字母改變(`datsuta` → `datta`),這些行既有的手動斷字會因 `letters` 校驗不符而失效(被忽略,不會插錯位置)。不適用長音符那種相容分支:字母數不同,斷點索引無法對應
+- 句末的促音(`あっ` → `atsu`、`ほらっ` → `hora tsu`)沒有下一個 token,不在此修正範圍
 
 ## 手動斷字
 
@@ -515,7 +542,7 @@ LRCLIB 與畫面歌詞的比對低於 50%(版本不同、Live 版)即整組放�
 每次改動均須執行下列三項,順序不可調換:
 
 ```bash
-npm test               # 純函式測試(201 項)
+npm test               # 純函式測試(211 項)
 npm run check:imports  # 遺漏 import 的靜態掃描
 npm run build          # src/ → dist/
 ```
@@ -545,6 +572,7 @@ esbuild 對未定義的全域識別字不報錯,建置階段無法攔截。以 v
 |---|---|
 | `corrections.test.js` | 長詞優先、消耗式比對、內建讀音逐筆對照、空原文的無限迴圈防護 |
 | `macron.test.js` | 長音符移除,重點為長度不變 |
+| `sokuon.test.js` | 促音 token 合併的條件,並以模擬分析器驗證 kuroshiro 的實際輸出(`datta`、は 仍為 `wa`) |
 | `numbers.test.js` | 阿拉伯數字轉漢字數字,含不予改寫的三種情況 |
 | `lrc.test.js` | 時間標籤換算、多標籤展開、逐字標籤、offset |
 | `cjk.test.js` | 日文判定、未轉換字的偵測、字串位置換算字母索引 |

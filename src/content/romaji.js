@@ -12,6 +12,7 @@
 
 import Kuroshiro from 'kuroshiro';
 import KuromojiAnalyzer from 'kuroshiro-analyzer-kuromoji';
+import { withSokuonMerge } from './sokuon.js';
 import { applyCorrections } from './corrections.js';
 import { loadUserCorrections, previewCorrections } from './corrections-store.js';
 import { hasJapanese, stripIterationMarks } from './cjk.js';
@@ -48,8 +49,11 @@ export const ready = (async () => {
   try {
     // 自訂讀音須一併等待:否則最初幾行會在字典尚未載入的狀態下轉換,
     // 舊結果進入快取後,使用者會認為自己新增的修正未生效。
+    //
+    // 分析器外包一層 withSokuonMerge:促音落在斷詞邊界時(だっ|た)先將 token 合併,
+    // 否則促音會被單獨轉為 tsu(datsu ta)。詳見 sokuon.js。
     await Promise.all([
-      kuroshiro.init(new KuromojiAnalyzer({ dictPath: chrome.runtime.getURL('dict/') })),
+      kuroshiro.init(withSokuonMerge(new KuromojiAnalyzer({ dictPath: chrome.runtime.getURL('dict/') }))),
       loadUserCorrections(),
     ]);
     console.info(`${LOG} kuroshiro ready in ${Math.round(performance.now() - startedAt)}ms`);
