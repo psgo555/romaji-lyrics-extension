@@ -1,6 +1,11 @@
 /**
  * content/index.js
- * Chrome Extension 的 content script,注入 open.spotify.com。
+ * Chrome Extension 的 content script,注入 open.spotify.com 與 music.youtube.com。
+ *
+ * 兩個平台共用同一支 content script,而非各自打包一個進入點:轉換佇列、
+ * 手動切分、修正面板、按鍵防護全部寫在本檔,拆成兩支就得將這些抽成共用模組
+ * 或複製一份。YouTube Music 的差異只在「歌詞行從何而來」(見 ytmusic-lyrics.js),
+ * 故僅在取得歌詞行、讀取曲目這幾處以 ON_YTMUSIC 分流,其餘流程完全相同。
  *
  * 取代原本的 content.js(現置於 legacy/),主要差異:
  * - 轉換改用 kuroshiro,漢字亦會被轉出(原本只用 wanakana,漢字會原樣留著)
@@ -59,6 +64,12 @@ import {
   seekFromPanelClick,
 } from './lrc-panel.js';
 import {
+  isYouTubeMusic,
+  syncYtmLyrics,
+  getYtmLineElements,
+  readYtmNowPlaying,
+} from './ytmusic-lyrics.js';
+import {
   DEFAULTS,
   getSettings,
   setSetting,
@@ -79,6 +90,15 @@ const LOG = '[romaji]';
 // 故不再以容器選擇器抓取歌詞區塊,直接抓歌詞行、observer 掛在 document.body 上。
 const LINE_SELECTOR = '[data-testid="lyrics-line"]';
 const LYRICS_BUTTON_SELECTOR = '[data-testid="lyrics-button"]';
+
+/*
+ * 目前是否在 YouTube Music 上。載入時判定一次即可 —— content script 是依網域注入的,
+ * 同一個實例不會在執行中換到另一個平台。
+ *
+ * YouTube Music 目前為 Phase 1:只顯示拼音,不做時間軸、高亮與 LRCLIB 備援。
+ * 各處分流的註解會說明略過的是哪一段、為何略過。
+ */
+const ON_YTMUSIC = isYouTubeMusic();
 
 const PROCESSED_FLAG = 'data-romaji-processed'; // pending | done | skipped | empty
 const DEBOUNCE_MS = 100;
@@ -1235,8 +1255,11 @@ function updateActiveLine() {
  *
  * 抽出為一個函式是為了讓佇列的優先順序邏輯毋須知道歌詞來自何處:
  * 不論何種來源,「正在演唱的那一行先轉換」都是同一套規則。
+ *
+ * YouTube Music 的行是自行拆出來的(見 ytmusic-lyrics.js),不經過上述兩者。
  */
 function currentLineElements() {
+  if (ON_YTMUSIC) return getYtmLineElements();
   const spotify = [...document.querySelectorAll(LINE_SELECTOR)];
   if (spotify.length) return spotify;
   return isLrcPanelOpen() ? getPanelLineElements() : [];
@@ -1244,6 +1267,11 @@ function currentLineElements() {
 
 function scanNow() {
   if (!isEnabled()) return;
+
+  // YouTube Music 的行須先拆出來才收集得到。順序不可顛倒:換歌時原生文字已換,
+  // 不先重建的話,下方收集到的是上一首的行,新歌要等下一輪掃描才有拼音。
+  if (ON_YTMUSIC) syncYtmLyrics();
+
   const lines = currentLineElements();
 
   // 先確認目前唱到哪一行,pickNext 才有依據。
@@ -1254,7 +1282,11 @@ function scanNow() {
   // 面板的高亮是 updateLrcPanel 依 LRC 時間軸自行標記的。
   // markActive 是讀取 Spotify 內層元素的樣式來判斷的,面板上沒有那些元素,
   // 讓它介入只會將面板已標記好的 data-romaji-active 清除。
-  if (!lineTimes && !isLrcPanelOpen()) markActive(lines);
+  //
+  // YouTube Music 亦不可:其歌詞是純文字,沒有任何高亮可供觀察,markActive
+  // 只能退到「最接近畫面中央」那一條策略,等於隨便挑一行亮起來。
+  // Phase 1 不做高亮,假的高亮比沒有高亮更糟。
+  if (!ON_YTMUSIC && !lineTimes && !isLrcPanelOpen()) markActive(lines);
 
   for (const lineEl of lines) {
     if (needsProcessing(lineEl)) enqueue(lineEl);
@@ -1369,6 +1401,17 @@ function tick() {
   // 最壞情況也只是慢一秒,不會永遠不更新。
   scanNow();
 
+  /*
+   * YouTube Music 到此為止。
+   *
+   * 以下是 Spotify 歌詞檢視的判斷(歌詞按鈕、等不到歌詞行即改問 LRCLIB),
+   * 其選擇器在 YouTube Music 上一個都不存在。放著讓它執行目前不會出錯
+   * (找不到按鈕 → 視為檢視未開啟 → 什麼都不做),但那是碰巧無害而非設計如此 ——
+   * 日後調整那段的退路判斷,YouTube Music 就可能莫名開始向 LRCLIB 查詢。
+   * 備援屬於 Phase 2 之後的範圍,在此明確擋下。
+   */
+  if (ON_YTMUSIC) return;
+
   const lineCount = document.querySelectorAll(LINE_SELECTOR).length;
 
   if (lineCount > 0) {
@@ -1425,7 +1468,8 @@ function lyricsViewExplicitlyClosed() {
 }
 
 /** 本擴充功能自行插入頁面的元素。來自這些元素的變動不應再觸發掃描 */
-const OWN_ELEMENTS = '.romaji-overlay, .romaji-original, .romaji-toggle, .romaji-lrc-panel';
+const OWN_ELEMENTS =
+  '.romaji-overlay, .romaji-original, .romaji-toggle, .romaji-lrc-panel, .romaji-ytm-lyrics';
 
 /**
  * 這一筆變動是本擴充功能自身造成的嗎?
@@ -1503,7 +1547,10 @@ function startWatching() {
   // 高亮須另以較快的節奏更新。
   // 掛在 tick(1 秒)上的話,平均會慢半秒才換行 —— 跟唱時十分明顯。
   // 這個迴圈只做標記、不做轉換,成本很低(而且 findActiveIndex 內部還有快取)。
-  timers.push(setInterval(updateActiveLine, ACTIVE_TICK_MS));
+  //
+  // YouTube Music 不啟動:Phase 1 沒有高亮,這個迴圈每 80ms 查一次 Spotify 的
+  // 歌詞行、查不到便返回,純屬空轉。
+  if (!ON_YTMUSIC) timers.push(setInterval(updateActiveLine, ACTIVE_TICK_MS));
 
   tick();
   timers.push(setInterval(tick, TICK_MS));
@@ -1513,6 +1560,9 @@ function startWatching() {
 
 /** 自播放列讀出目前的曲目資訊。Spotify 改版過數次,故列出數個備援選擇器。 */
 function readNowPlaying() {
+  // 曲名供修正面板的「分享」與曲目專屬字典使用,兩個平台皆需要
+  if (ON_YTMUSIC) return readYtmNowPlaying();
+
   const widget = document.querySelector('[data-testid="now-playing-widget"]');
   if (!widget) return null;
 
@@ -1643,8 +1693,12 @@ async function main() {
     reconvertEverything();
   });
 
-  // 高亮須由播放進度驅動,時鐘必須自一開始便運轉
-  startClock();
+  // 高亮須由播放進度驅動,時鐘必須自一開始便運轉。
+  //
+  // YouTube Music 不啟動:playback-clock.js 是為了 Spotify「讀不到播放進度」
+  // 而做的估算,觀察的是 Spotify 的進度文字。YouTube Music 有 #movie_player
+  // 可直接讀取精確秒數,Phase 2 做高亮時應改用那個,而非沿用這套估算。
+  if (!ON_YTMUSIC) startClock();
 
   startWatching();
 }
