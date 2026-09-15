@@ -7,7 +7,7 @@
 ```bash
 npm install
 npm run build          # 打包至 dist/
-npm test               # 211 項純函式測試
+npm test               # 221 項純函式測試
 ```
 
 於 `chrome://extensions` 啟用開發人員模式,點選「載入未封裝項目」並選擇 `dist/`。
@@ -67,6 +67,7 @@ src/content/
   splitter.js                   手動斷字的資料模型與渲染
   toggle-button.js              播放列上的顯示方式切換鈕
   lrc-panel.js                  LRCLIB 歌詞浮動面板
+  lyrics-button.js              Spotify 歌詞按鈕的狀態判讀(開啟、關閉、無歌詞)
   ytmusic-lyrics.js             YouTube Music 歌詞分頁的逐句拆解與掛載
   drag-bounds.js                面板位置的邊界夾制
   notice.js                     畫面角落的暫時提示
@@ -112,7 +113,7 @@ dist/                           打包產物,「載入未封裝項目」須選�
 | 函式庫無法自 CDN 載入(頁面 CSP 阻擋) | `build.mjs` 以 esbuild 將 kuroshiro 與 kuromoji 打包進 `dist/content.js`;辭典檔複製至 `dist/dict/`,並於 manifest 的 `web_accessible_resources` 開放 |
 | kuromoji 載入辭典耗時,不宜等待使用者開啟面板 | `romaji.js` 於模組載入時即啟動 `kuroshiro.init()`,`toRomaji()` 僅 await 同一個 Promise |
 | LRCLIB 呼叫受頁面 CSP 限制 | 移至 `service-worker.js`,content script 透過 `chrome.runtime.sendMessage` 呼叫 |
-| 「無歌詞」的判定時機 | 僅在歌詞檢視確實開啟、且連續 12 秒無任何歌詞行時才啟用備援。檢視未開啟時不作判定 |
+| 「無歌詞」的判定時機 | 兩種情況啟用備援:歌詞檢視已開啟且連續 4 秒無任何歌詞行;或使用者按下 Spotify 標示為無歌詞(disabled)的歌詞按鈕。兩者皆未發生時不作判定 |
 | 僅使用 wanakana,漢字不轉換 | 改用 kuroshiro,`mode: 'spaced'`。例:`桜が咲く` → `sakura ga saku` |
 | kuromoji 對部分固定讀法讀錯 | `corrections.js` 於送入 kuroshiro 前替換為正確假名 |
 | Hepburn 長音符顯示為母音上方橫線 | `macron.js` 的 `stripMacrons()` 於轉換出口移除 |
@@ -213,7 +214,24 @@ kuromoji 依詞彙邊界斷詞,長動詞會形成無內部空格的長串(`透�
 
 部分曲目 Spotify 未提供歌詞。此時歌詞檢視為空,原有流程無元素可處理。`lrc-panel.js` 於此情況下以 LRCLIB 的歌詞建立浮動面板。
 
-**觸發條件為歌詞檢視已開啟、且連續 12 秒無任何歌詞行。** 因此其處理的是「Spotify 無此曲目歌詞」,而非「更換歌詞來源」——Spotify 有歌詞時不會進入此路徑。若欲改為優先使用 LRCLIB,應修改 `index.js` `tick()` 中的觸發條件,而非面板本身。
+**兩個觸發條件,皆以「使用者想看歌詞」為前提:**
+
+| 情境 | 歌詞按鈕 | 觸發方式 |
+|---|---|---|
+| 檢視打得開但內容是空的(paywall 等) | 可點,`aria-pressed="true"` | 歌詞檢視已開啟,且連續 4 秒無任何歌詞行(`tick()`) |
+| Spotify 無此曲目歌詞 | HTML `disabled`,檢視打不開 | 使用者按下該按鈕(`onLyricsButtonPress`) |
+
+第二種情境原本未涵蓋:判斷只看 `aria-pressed`,而 disabled 按鈕的該值永遠為 `"false"`,被當成「使用者沒開檢視」,備援永遠不會觸發(實測《ホログラム》/ Muray)。按鈕狀態的判讀集中於 `lyrics-button.js`,以 `disabled` 屬性為準,不讀隨語系改變的 `aria-label`。
+
+第二種情境須注意三點:
+
+- **不在偵測到 disabled 時自動觸發。** 自動觸發會使歌單中每首沒有歌詞的歌都向 LRCLIB 送出歌名並彈出面板,即使使用者沒在看歌詞;廣告期間按鈕多半同樣為 disabled。隱私權政策所寫的傳送時機亦是「需要查詢歌詞時」
+- **聽 `pointerdown` 而非 `click`。** 瀏覽器不會對 disabled 按鈕送出 `click`、`mousedown`、`mouseup`,但仍送出 `pointerdown`(實測 Chrome 152)。以座標比對按鈕範圍,按鈕若另設 `pointer-events:none`,事件落在下方元素上同樣認得出來
+- **disabled 不算「使用者關閉了檢視」。** 否則按下按鈕開啟的面板會在下一秒被 `tick()` 收起(見下方「歌詞檢視關閉僅認定明確的否定值」)
+
+LRCLIB 也查不到時,由按鈕觸發者會顯示提示;再按同一首歌不重新查詢。
+
+因此備援處理的是「Spotify 無此曲目歌詞」,而非「更換歌詞來源」——Spotify 有歌詞時不會進入此路徑。若欲改為優先使用 LRCLIB,應修改觸發條件,而非面板本身。
 
 面板的每一行刻意與 Spotify 歌詞行同構:
 
@@ -240,7 +258,7 @@ kuromoji 依詞彙邊界斷詞,長動詞會形成無內部空格的長串(`透�
 
 - **自動捲動須讓位於使用者操作。** 使用者捲動後 4 秒內不介入,否則無法往回查看。`scroll` 事件無法區分來源,故自動捲動前須將「使用者捲動」的時間戳往前調整,否則自動捲動在第一次之後即停止運作。
 - **面板須於適當時機關閉**:換歌、Spotify 歌詞後續載入、擴充功能重新載入。使用者關閉過的曲目不再自動開啟。
-- **歌詞檢視關閉僅認定明確的否定值。** `isLyricsViewOpen()` 找不到歌詞按鈕時會退而檢查畫面上是否有歌詞行,而面板開啟時該判斷必為 false。直接採用其結果,會使面板在找不到按鈕的 Spotify 版本上於開啟後立即關閉。
+- **歌詞檢視關閉僅認定明確的否定值。** `isLyricsViewOpen()` 找不到歌詞按鈕時會退而檢查畫面上是否有歌詞行,而面板開啟時該判斷必為 false。直接採用其結果,會使面板在找不到按鈕的 Spotify 版本上於開啟後立即關閉。按鈕為 disabled 時同理,其 `aria-pressed` 恆為 `"false"`,不代表使用者關閉了檢視
 
 ## 掃描速度
 
@@ -409,7 +427,7 @@ kuromoji 不處理阿拉伯數字,會將其原樣輸出:`50年を50億で買お�
 歌曲長度: [data-testid="playback-duration"]     文字,格式 "4:03"
 ```
 
-歌詞按鈕的 `aria-pressed` 用於判定使用者是否確實開啟歌詞檢視,為 LRCLIB 備援的前提條件。
+歌詞按鈕的 `aria-pressed` 用於判定使用者是否確實開啟歌詞檢視,`disabled` 用於判定 Spotify 無此曲目歌詞,兩者皆為 LRCLIB 備援的前提條件(見「LRCLIB 歌詞面板」)。
 
 ### 實測結論
 
@@ -542,7 +560,7 @@ LRCLIB 與畫面歌詞的比對低於 50%(版本不同、Live 版)即整組放�
 每次改動均須執行下列三項,順序不可調換:
 
 ```bash
-npm test               # 純函式測試(211 項)
+npm test               # 純函式測試(221 項)
 npm run check:imports  # 遺漏 import 的靜態掃描
 npm run build          # src/ → dist/
 ```
@@ -585,6 +603,7 @@ esbuild 對未定義的全域識別字不報錯,建置階段無法攔截。以 v
 | `shared-dictionary.test.js` | 共用字典驗證,含限定單曲的條目 |
 | `apply-reading.test.js` | issue 內容解析、寫入字典、以驗證器覆核 |
 | `ytmusic-lyrics.test.js` | YouTube Music 歌詞拆解(`\r\n`、段落、空白)、曲目判定(廣告不算) |
+| `lyrics-button.test.js` | Spotify 歌詞按鈕狀態:無歌詞(disabled)不算使用者關閉、按壓命中判斷 |
 
 測試本身以注入已知錯誤的方式驗證過:
 
