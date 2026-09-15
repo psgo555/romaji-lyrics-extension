@@ -70,6 +70,12 @@ import {
   readYtmNowPlaying,
 } from './ytmusic-lyrics.js';
 import {
+  readLyricsButton,
+  lyricsViewOpenFromButton,
+  isLyricsViewClosedByUser,
+  isPressOnUnavailableButton,
+} from './lyrics-button.js';
+import {
   DEFAULTS,
   getSettings,
   setSetting,
@@ -142,6 +148,7 @@ let lastScanAt = 0; // 上一次實際掃描的時間
 let selfMutating = 0; // >0 代表目前的 DOM 變動由自身造成,observer 須略過
 let emptyTicks = 0;
 let fallbackAskedFor = null; // 已向 LRCLIB 查詢過的曲目 key,避免重複請求
+let fallbackNotFoundFor = null; // LRCLIB 也查不到的曲目 key,再按一次歌詞按鈕時毋須重問
 let currentTrackKey = null; // 目前這首歌,用以偵測換歌
 let panelDismissedFor = null; // 使用者手動關閉面板的曲目 key,同一首不再自動開啟
 
@@ -1339,11 +1346,8 @@ function runScan() {
  * 卻等不到任何歌詞行時,才有資格向 LRCLIB 查詢。
  */
 function isLyricsViewOpen() {
-  const button = document.querySelector(LYRICS_BUTTON_SELECTOR);
-  if (button) {
-    const pressed = button.getAttribute('aria-pressed') ?? button.getAttribute('data-active');
-    if (pressed !== null) return pressed === 'true';
-  }
+  const fromButton = lyricsViewOpenFromButton(readLyricsButton(document.querySelector(LYRICS_BUTTON_SELECTOR)));
+  if (fromButton !== null) return fromButton;
   // 找不到按鈕(Spotify 改版)即退回檢視畫面上是否有歌詞行
   return Boolean(document.querySelector(LINE_SELECTOR));
 }
@@ -1382,6 +1386,7 @@ function tick() {
     lrcAskedFor = null;
     emptyTicks = 0;
     fallbackAskedFor = null;
+    fallbackNotFoundFor = null;
     panelDismissedFor = null; // 上一首關閉了不代表這一首也不想看
     closeLrcPanel();
     // 修正面板是綁在某一句上的,換歌之後那一句已不在畫面上
@@ -1448,23 +1453,25 @@ function tick() {
      * 會退回檢視畫面上是否有歌詞行,而面板開啟時該判斷必然為 false。
      * 逕自相信它的話,在找不到按鈕的 Spotify 版本上,面板會在開啟的下一秒
      * 便自行關閉 —— 使用者只會看到它閃一下。
+     *
+     * 按鈕為 disabled(Spotify 無此曲目歌詞)時同樣不算關閉:該狀態下 aria-pressed
+     * 永遠是 "false",而面板正是為此而開。先前未區分,按下按鈕開啟的面板
+     * 會在下一秒被這一行收起。
      */
     if (isLrcPanelOpen() && lyricsViewExplicitlyClosed()) closeLrcPanel();
   }
 }
 
 /**
- * 歌詞檢視確定是關閉的嗎?
+ * 歌詞檢視確定是使用者關閉的嗎?
  *
  * 與 isLyricsViewOpen() 的差別在於「不確定」時的處理方式:該函式在找不到
  * 按鈕時會以歌詞行數推測,本函式則回傳 false(不確定即視為未關閉)。
  * 因為此處要做的是關閉面板 —— 猜錯的代價是把使用者正在檢視的內容弄不見。
+ * 判讀規則見 lyrics-button.js。
  */
 function lyricsViewExplicitlyClosed() {
-  const button = document.querySelector(LYRICS_BUTTON_SELECTOR);
-  if (!button) return false;
-  const pressed = button.getAttribute('aria-pressed') ?? button.getAttribute('data-active');
-  return pressed === 'false';
+  return isLyricsViewClosedByUser(readLyricsButton(document.querySelector(LYRICS_BUTTON_SELECTOR)));
 }
 
 /** 本擴充功能自行插入頁面的元素。來自這些元素的變動不應再觸發掃描 */
@@ -1581,17 +1588,20 @@ function readNowPlaying() {
 }
 
 /**
- * 歌詞檢視開啟中、但等待 FALLBACK_AFTER_TICKS 秒仍一行都沒有時
- * (paywall 或該曲確實沒有歌詞),改請 service worker 向 LRCLIB 查詢,
- * 查到即開啟一個自有的浮動面板將歌詞顯示出來。
+ * 請 service worker 向 LRCLIB 查詢,查到即開啟一個自有的浮動面板將歌詞顯示出來。
+ *
+ * 兩個觸發來源,皆以「使用者想看歌詞」為前提:
+ *   1. 歌詞檢視開啟中、但等待 FALLBACK_AFTER_TICKS 秒仍一行都沒有(paywall 等)
+ *   2. 使用者按下 Spotify 標示為無歌詞的歌詞按鈕(見 onLyricsButtonPress)
  *
  * ── 本 fallback 的適用範圍 ────────────────────────────────
- * 觸發條件是「面板開啟卻等不到任何歌詞行」,故它所處理的是
- * Spotify 根本沒有這首歌的歌詞。它並非「更換一個歌詞來源」——
+ * 兩者處理的都是 Spotify 根本沒有這首歌的歌詞。它並非「更換一個歌詞來源」——
  * Spotify 有歌詞時此處永遠不會被呼叫到。
- * 日後若欲改為優先採用 LRCLIB,要修改的是 tick() 中的觸發條件,而非此處。
+ * 日後若欲改為優先採用 LRCLIB,要修改的是觸發條件,而非此處。
+ *
+ * @param {{ fromPress?: boolean }} [options] fromPress:由按下歌詞按鈕觸發
  */
-async function tryLrclibFallback() {
+async function tryLrclibFallback({ fromPress = false } = {}) {
   if (!isEnabled()) return;
 
   const nowPlaying = readNowPlaying();
@@ -1601,7 +1611,12 @@ async function tryLrclibFallback() {
   if (fallbackAskedFor === key) return;
   fallbackAskedFor = key;
 
-  console.info(`${LOG} 歌詞面板開著但 ${FALLBACK_AFTER_TICKS} 秒內沒有任何歌詞,改問 LRCLIB:`, key);
+  console.info(
+    fromPress
+      ? `${LOG} Spotify 標示這首歌沒有歌詞,使用者按下歌詞按鈕,改問 LRCLIB:`
+      : `${LOG} 歌詞面板開著但 ${FALLBACK_AFTER_TICKS} 秒內沒有任何歌詞,改問 LRCLIB:`,
+    key
+  );
 
   try {
     // 一定要走 askForLyrics —— 此處若自行組裝訊息便會遺漏曲目長度,
@@ -1626,6 +1641,15 @@ async function tryLrclibFallback() {
     }
     if (!res?.lines?.length && !res?.synced) {
       console.info(`${LOG} LRCLIB 也沒有這首歌的歌詞`);
+      fallbackNotFoundFor = key;
+      /*
+       * 按下按鈕而來的才提示。那是一個明確的動作,毫無反應看起來與故障無異 ——
+       * 使用者正是因為「按了沒反應」才會回報問題。
+       * 檢視開啟而來的那一條維持原樣:畫面上已有 Spotify 自己的無歌詞訊息。
+       */
+      if (fromPress && key === currentTrackKey) {
+        showNotice('找不到這首歌的歌詞', 'Spotify 沒有提供這首歌的歌詞,LRCLIB 也查不到。');
+      }
       return;
     }
 
@@ -1656,6 +1680,50 @@ async function tryLrclibFallback() {
   }
 }
 
+/**
+ * 按下 Spotify 標示為無歌詞的歌詞按鈕 → 直接向 LRCLIB 查詢。
+ *
+ * ── 需要這條路徑的原因 ────────────────────────────────────
+ * Spotify 沒有某首歌的歌詞時,歌詞按鈕為 HTML disabled(實測 2026-09,
+ * 《ホログラム》/ Muray)。檢視根本打不開,tick() 等的「檢視開啟卻是空的」
+ * 永遠不會出現,備援因而從未觸發。
+ *
+ * ── 不在偵測到 disabled 時自動觸發的原因 ─────────────────────
+ * 備援一向以「使用者想看歌詞」為前提。自動觸發會使歌單中每一首沒有歌詞的歌
+ * 都向 LRCLIB 送出歌名並彈出面板,即使使用者根本沒在看歌詞;廣告播放期間
+ * 按鈕多半同樣為 disabled,也會拿廣告名稱去查詢。隱私權政策所寫的傳送時機
+ * 亦是「需要查詢歌詞時」。按下那顆按鈕,就是使用者想看歌詞的明確表示。
+ *
+ * ── 為何聽 pointerdown 而非 click ─────────────────────────
+ * 瀏覽器不會對 disabled 按鈕送出 click、mousedown、mouseup,但仍會送出
+ * pointerdown(實測 Chrome 152)。判斷以座標比對按鈕範圍,不看事件的 target,
+ * 按鈕另設 pointer-events:none 時事件會落在下方元素上,同樣認得出來。
+ */
+function onLyricsButtonPress(event) {
+  if (ON_YTMUSIC) return;
+
+  const button = document.querySelector(LYRICS_BUTTON_SELECTOR);
+  const state = readLyricsButton(button);
+  if (!isPressOnUnavailableButton(state, button?.getBoundingClientRect(), event.clientX, event.clientY)) return;
+
+  // 面板已經開著:再按一次不重建,否則使用者捲到一半的位置會被重置
+  if (isLrcPanelOpen()) return;
+
+  const nowPlaying = readNowPlaying();
+  const key = nowPlaying ? `${nowPlaying.trackName}|${nowPlaying.artistName}` : null;
+
+  // 這首歌剛查過、LRCLIB 也沒有:再說一次結果即可,不重複打擾別人免費提供的服務
+  if (key && fallbackNotFoundFor === key) {
+    showNotice('找不到這首歌的歌詞', 'Spotify 沒有提供這首歌的歌詞,LRCLIB 也查不到。');
+    return;
+  }
+
+  // 明確的動作優先於先前的記錄:關掉過面板的使用者再按一次,就是要再看
+  panelDismissedFor = null;
+  fallbackAskedFor = null;
+  tryLrclibFallback({ fromPress: true });
+}
+
 /* ------------------------------------------------------------------ 啟動 */
 
 async function main() {
@@ -1666,6 +1734,10 @@ async function main() {
   ready.catch(() => {});
 
   registerSplitInteractions();
+
+  // 按下「無歌詞」的歌詞按鈕即改問 LRCLIB。該按鈕為 disabled、收不到 click,
+  // 故聽 pointerdown;捕獲階段以免 Spotify 攔下(見 onLyricsButtonPress)
+  document.addEventListener('pointerdown', onLyricsButtonPress, true);
 
   /*
    * 索取一份共用字典。
