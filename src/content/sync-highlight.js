@@ -9,19 +9,13 @@
  * 且句內進度為連續值。
  */
 
-/**
- * 比對用的正規化。
+/*
+ * 比對用的正規化取自 text-match.js。
  *
- * LRCLIB 的歌詞與 Spotify 顯示的內容常有細微差異(空白、全形半形、標點),
- * 逐字元比對幾乎必然失敗,因而僅保留具辨識度的部分。
+ * 該規則原本寫在本檔內部,現由本檔的逐句對齊與 lyrics-align.js 的字元對齊共用 ——
+ * 兩者若各持一套,某些曲目的對齊率會莫名下降且不會拋出錯誤。
  */
-function normalize(text) {
-  return (text ?? '')
-    .normalize('NFKC') // 全形英數 → 半形,相容字 → 標準字
-    .replace(/\s+/g, '')
-    .replace(/[!-/:-@[-`{-~、-〟｡-･]/g, '') // 一律移除標點
-    .toLowerCase();
-}
+import { normalizeForMatch as normalize } from './text-match.js';
 
 /**
  * 將 LRC 的每一句對應至畫面上的每一行。
