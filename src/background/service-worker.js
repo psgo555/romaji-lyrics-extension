@@ -9,16 +9,14 @@
  */
 
 /*
- * 日文判定沿用 content script 的實作。
+ * 「挑哪一個版本」的規則集中於 shared/pick-lyrics.js,此處不另寫一份。
  *
- * 不於此另寫一份正規表達式:cjk.js 涵蓋的範圍廣得多(疊字符、半形片假名、
- * 擴充漢字區),同一項判斷若存在兩份實作,終將出現一邊修改而另一邊未同步的情形
- * —— 本專案已於「長音符」與「曲目長度」各發生過一次。
- *
- * cjk.js 不 import 任何模組,亦不觸及畫面與擴充功能介面,背景程式可安全引用。
+ * 同一項判斷若存在兩份實作,終將出現一邊修改而另一邊未同步的情形 ——
+ * 本專案已於「長音符」與「曲目長度」各發生過一次。該模組亦不相依 chrome 與 DOM,
+ * 背景程式可安全引用,且能以單元測試逐條驗證(整條流程中唯一會「挑錯」的地方)。
  */
-import { hasJapanese } from '../content/cjk.js';
 import { parseSharedDictionary } from '../shared/shared-dictionary.js';
+import { pickLyrics, toPayload } from '../shared/pick-lyrics.js';
 
 const LRCLIB_ENDPOINT = 'https://lrclib.net/api/search';
 /*
@@ -54,14 +52,33 @@ function cacheKey(trackName, artistName) {
  * 推進版本號同時亦是修復手段 —— v2 的資料可能是在沒有長度資訊的情況下
  * 挑出的錯誤版本(見下方 readCache 的說明),推進版本號可使已存入的錯誤資料
  * 自動作廢重抓,毋須使用者手動清除。
+ *
+ * v3 → v4:增加 ref(挑選時所依據的畫面歌詞)與對齊結果 times。
  */
-const CACHE_VERSION = 3;
+const CACHE_VERSION = 4;
+
+/**
+ * 挑選時所依據的畫面歌詞的識別值。
+ *
+ * 快取須據此區分:「依內容挑出的版本」與「依中繼資料挑出的版本」是兩個不同的答案
+ * (實測 Lemon:依中繼資料挑到的是羅馬拼音版,依內容挑到的才是畫面上那一份日文)。
+ * 共用同一格會使先到的那一種佔住快取,另一種在七天內都拿到錯的版本。
+ *
+ * 只需要「是否為同一份參考歌詞」,故存雜湊而非整份文字 —— 快取的體積不該隨歌詞長度增長。
+ */
+function referenceKey(lines) {
+  if (!lines?.length) return null;
+  const text = lines.join('\n');
+  let hash = 5381;
+  for (let i = 0; i < text.length; i += 1) hash = ((hash * 33) ^ text.charCodeAt(i)) >>> 0;
+  return `${text.length}:${hash.toString(36)}`;
+}
 
 /**
  * 讀取快取。除版本與有效期外,尚須確認該筆是否以相同的曲目長度挑選而得。
  *
  * 長度須納入判斷的原因:同一首歌在 LRCLIB 常有數個版本(單曲版、專輯版、Live),
- * 長度差異大且時間軸完全不通用。requestLrclib 以曲目長度篩除非同一版本的結果,
+ * 長度差異大且時間軸完全不通用。pick-lyrics.js 以曲目長度篩除非同一版本的結果,
  * 因此「以長度 245 挑出的結果」與「未經篩選挑出的結果」是兩個不同的答案,
  * 不可共用同一格快取。
  *
@@ -70,7 +87,7 @@ const CACHE_VERSION = 3;
  * - 提供長度且與當初一致 → 命中
  * - 提供長度但當初非以其挑選 → 視為未命中,重新取得以挑出正確版本
  */
-async function readCache(key, durationSec) {
+async function readCache(key, durationSec, refKey) {
   const stored = await chrome.storage.local.get(key);
   const entry = stored[key];
   if (!entry) return null;
@@ -81,40 +98,38 @@ async function readCache(key, durationSec) {
   }
 
   if (durationSec && entry.pickedFor !== durationSec) return null;
+  // 參考歌詞不同(或一方有、一方沒有)即為不同的答案,不可共用(見 referenceKey)
+  if ((entry.ref ?? null) !== (refKey ?? null)) return null;
 
-  return { lines: entry.lines, synced: entry.synced ?? null };
+  return {
+    lines: entry.lines,
+    synced: entry.synced ?? null,
+    times: entry.times ?? null,
+    coverage: entry.coverage ?? 0,
+    pickedBy: entry.pickedBy ?? 'metadata',
+  };
 }
 
-async function writeCache(key, payload, durationSec) {
+async function writeCache(key, payload, durationSec, refKey) {
   await chrome.storage.local.set({
-    [key]: { v: CACHE_VERSION, ...payload, pickedFor: durationSec ?? null, savedAt: Date.now() },
+    [key]: {
+      v: CACHE_VERSION,
+      ...payload,
+      pickedFor: durationSec ?? null,
+      ref: refKey ?? null,
+      savedAt: Date.now(),
+    },
   });
 }
 
 /**
- * 該筆歌詞中含日文的行數比例(0~1)。
+ * 向 LRCLIB 送出一次搜尋。只負責取得結果,挑選交由 pick-lyrics.js。
  *
- * 以「行」而非「字」為單位,是因為所要分辨的正是對照版:
- * 其日文一句不少,僅在每句後方插入一句翻譯。按字數計算會沖淡兩者的差距,
- * 按行計算則為 54% 對 95% 的明確差異。
- *
- * 開頭數行製作資訊(作詞、作曲)一併計入 —— 其中含歌手名的漢字,
- * 兩種版本皆有,對比較結果無影響,不值得為此另寫排除邏輯。
+ * @param {Record<string, string>} params 查詢參數(track_name,artist_name 為選填)
+ * @returns {Promise<Array<object>|null>} 請求失敗或回應非 JSON 時回 null
  */
-function japaneseRatio(entry) {
-  const text = entry?.syncedLyrics || entry?.plainLyrics || '';
-  const lines = text.split('\n').filter((line) => line.trim());
-  if (!lines.length) return 0;
-  return lines.filter((line) => hasJapanese(line)).length / lines.length;
-}
-
-/**
- * 以歌名與歌手名向 LRCLIB 搜尋歌詞。
- * @returns {Promise<{lines: string[]|null, synced: string|null}|null>}
- *          挑選後的最佳結果;查無結果或請求失敗時回傳 null
- */
-async function requestLrclib(trackName, artistName, durationSec) {
-  const url = `${LRCLIB_ENDPOINT}?track_name=${encodeURIComponent(trackName)}&artist_name=${encodeURIComponent(artistName)}`;
+async function searchLrclib(params) {
+  const url = `${LRCLIB_ENDPOINT}?${new URLSearchParams(params)}`;
 
   // 未設逾時的 fetch 可能持續等待,導致 service worker 遭回收時
   // 訊息通道無聲關閉(即 "message channel closed" 警告的來源之一)
@@ -144,49 +159,7 @@ async function requestLrclib(trackName, artistName, durationSec) {
     }
 
     const results = await res.json();
-    if (!Array.isArray(results) || results.length === 0) return null;
-
-    const usable = results.filter((r) => r?.plainLyrics || r?.syncedLyrics);
-    if (!usable.length) return null;
-
-    // 同一首歌常有多個版本(單曲版、專輯版、Live),長度差異大者時間軸完全對不上。
-    // 先以歌曲長度篩除明顯不屬同一版本的結果。
-    const sameLength = durationSec
-      ? usable.filter((r) => Math.abs((r.duration ?? 0) - durationSec) <= 3)
-      : [];
-    const pool = sameLength.length ? sameLength : usable;
-
-    /*
-     * 其餘結果依兩項條件排序,取最佳者。
-     *
-     * 1. 有時間軸者優先 —— 逐句同步僅在具備時間軸時成立,價值最高
-     * 2. 同樣有時間軸時,取日文比例最高者
-     *
-     * 第 2 點源自實測(Lemon,LRCLIB 回傳 20 筆):
-     * 內容由使用者上傳,同一首歌會混雜「純日文版」與「日文 + 外語對照版」。
-     * 對照版每句寫兩遍且時間標記相同,日文僅佔 54%;純日文版為 95%。
-     *
-     * 挑到對照版的後果:歌詞面板每句印兩遍,且因兩行時間相同、
-     * activeIndexAt 取的是最後一個符合者,高亮會停在翻譯那一行。
-     *
-     * 採「比例最高」而非「必須含日文」的原因:
-     * 使用者亦聽中文與英文歌,該類歌曲本就不含日文。硬性條件會使其
-     * 由「有歌詞」變為「完全沒有歌詞」,等於為修正一種情況而破壞另一種。
-     * 改以排序則無此問題:全數不含日文時分數相同,順序不變,
-     * 行為與改動前完全一致。
-     */
-    const best = [...pool].sort(
-      (a, b) =>
-        Number(Boolean(b.syncedLyrics)) - Number(Boolean(a.syncedLyrics)) ||
-        japaneseRatio(b) - japaneseRatio(a)
-    )[0];
-
-    return {
-      lines: best.plainLyrics
-        ? best.plainLyrics.split('\n').map((line) => line.trim()).filter(Boolean)
-        : null,
-      synced: best.syncedLyrics ?? null,
-    };
+    return Array.isArray(results) ? results : null;
   } catch (err) {
     if (err?.name === 'AbortError') {
       console.warn(`${LOG} LRCLIB 請求逾時(${FETCH_TIMEOUT_MS / 1000} 秒)`);
@@ -200,31 +173,81 @@ async function requestLrclib(trackName, artistName, durationSec) {
 }
 
 /**
+ * 查詢並挑出要用的那一筆。
+ *
+ * 有參考歌詞卻挑不到內容相符的版本時,改以曲名再查一次。
+ * 實測(2026-09)的必要性:YouTube Music 顯示的歌手名可能是英文或翻譯名
+ * (Kenshi Yonezu、愛繆、Remioromen),該名稱下的 LRCLIB 條目可能全是羅馬拼音版
+ * 或根本查不到;曲名通常仍為原文。Lemon 以曲名重查後相符度為 99%。
+ *
+ * 只在「有參考歌詞」時重查:沒有參考歌詞就無從判斷重查的結果是否更好,
+ * 多送一次請求只是增加別人的負擔。
+ */
+async function resolveLyrics(trackName, artistName, durationSec, referenceLines) {
+  const results = await searchLrclib({ track_name: trackName, artist_name: artistName });
+  let picked = pickLyrics(results, { durationSec, referenceLines });
+
+  if (referenceLines?.length && picked?.pickedBy !== 'content') {
+    const byTitle = await searchLrclib({ track_name: trackName });
+    const retry = pickLyrics(byTitle, { durationSec, referenceLines });
+    // 僅在重查確實對上內容時才採用;否則維持原本那一筆(至少歌名與歌手是對的)
+    if (retry?.pickedBy === 'content' || !picked) picked = retry ?? picked;
+  }
+
+  return toPayload(picked);
+}
+
+/**
  * 對外主要入口:先查快取,未命中才呼叫 API。
  * 同時掛於 globalThis,便於在 service worker 的 DevTools 手動測試:
  *   await fetchLyrics('曲名', '歌手名')
- * @returns {Promise<{lines: string[]|null, synced: string|null, cached: boolean}>}
+ *
+ * @param {string[]} [referenceLines] 畫面上已顯示的歌詞行(YouTube Music)。
+ *        提供時改以內容挑選版本,並回傳與這些行一一對應的時間 times。
+ * @returns {Promise<{lines: string[]|null, synced: string|null, cached: boolean,
+ *                    times?: Array<number|null>|null, coverage?: number, pickedBy?: string}>}
  */
-async function fetchLyrics(trackName, artistName, durationSec) {
-  if (!trackName || !artistName) return { lines: null, synced: null, cached: false };
+async function fetchLyrics(trackName, artistName, durationSec, referenceLines) {
+  const refKey = referenceKey(referenceLines);
+
+  /*
+   * 回應的形狀依有無參考歌詞而不同。
+   *
+   * 沒有參考歌詞時(Spotify 的備援)刻意維持原本的三個欄位,一個不多:
+   * 那條路徑已在使用中,多出來的欄位對它毫無意義,而「回應完全相同」
+   * 才能以快照逐欄位比對確認這次改動沒有波及它。
+   */
+  const shape = (payload, cached) =>
+    referenceLines?.length
+      ? {
+          lines: payload?.lines ?? null,
+          synced: payload?.synced ?? null,
+          times: payload?.times ?? null,
+          coverage: payload?.coverage ?? 0,
+          pickedBy: payload?.pickedBy ?? null,
+          cached,
+        }
+      : { lines: payload?.lines ?? null, synced: payload?.synced ?? null, cached };
+
+  if (!trackName || !artistName) return shape(null, false);
 
   const key = cacheKey(trackName, artistName);
 
-  const cached = await readCache(key, durationSec);
+  const cached = await readCache(key, durationSec, refKey);
   if (cached) {
     console.info(`${LOG} 命中快取: ${key}`);
-    return { ...cached, cached: true };
+    return shape(cached, true);
   }
 
-  // 同時進入的兩個請求若帶有不同的長度,結果亦不同,不可共用同一個 Promise
-  const flightKey = `${key}|${durationSec ?? ''}`;
+  // 同時進入的兩個請求若帶有不同的長度或不同的參考歌詞,結果亦不同,不可共用同一個 Promise
+  const flightKey = `${key}|${durationSec ?? ''}|${refKey ?? ''}`;
   if (inFlight.has(flightKey)) return inFlight.get(flightKey);
 
   const task = (async () => {
-    const result = await requestLrclib(trackName, artistName, durationSec);
-    if (result) await writeCache(key, result, durationSec);
+    const result = await resolveLyrics(trackName, artistName, durationSec, referenceLines);
+    if (result) await writeCache(key, result, durationSec, refKey);
     else console.info(`${LOG} 找不到「${trackName}」的歌詞`);
-    return { lines: result?.lines ?? null, synced: result?.synced ?? null, cached: false };
+    return shape(result, false);
   })().finally(() => inFlight.delete(flightKey));
 
   inFlight.set(flightKey, task);
@@ -367,7 +390,7 @@ function handleLyricsMessage(message, sendResponse) {
     respond({ lines: null, synced: null, cached: false, timedOut: true });
   }, RESPONSE_TIMEOUT_MS);
 
-  fetchLyrics(message.trackName, message.artistName, message.durationSec)
+  fetchLyrics(message.trackName, message.artistName, message.durationSec, message.lines)
     .then((result) => respond(result))
     .catch((err) => {
       console.error(`${LOG} 處理 FETCH_LYRICS 失敗:`, err);

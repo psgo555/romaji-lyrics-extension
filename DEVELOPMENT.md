@@ -7,7 +7,7 @@
 ```bash
 npm install
 npm run build          # 打包至 dist/
-npm test               # 221 項純函式測試
+npm test               # 254 項純函式測試
 ```
 
 於 `chrome://extensions` 啟用開發人員模式,點選「載入未封裝項目」並選擇 `dist/`。
@@ -46,6 +46,7 @@ public/manifest.json            MV3 設定
 src/shared/
   settings.js                   設定的預設值、範圍與讀寫(content 與 popup 共用)
   shared-dictionary.js          共用讀音字典的驗證
+  pick-lyrics.js                自 LRCLIB 的搜尋結果挑出要用的那一筆
 
 src/content/
   index.js                      歌詞 DOM 處理、拼音插入、轉換佇列、事件委派
@@ -53,6 +54,9 @@ src/content/
   numbers.js                    阿拉伯數字轉漢字數字(轉換前處理)
   macron.js                     長音符處理(romaji.js 與 splitter.js 共用)
   sokuon.js                     促音落在斷詞邊界時的 token 合併
+  text-match.js                 歌詞比對用的正規化(逐句對齊與字元對齊共用)
+  char-diff.js                  字元層級的對應(Myers,線性空間)
+  lyrics-align.js               以字元對應將 LRC 時間軸套到畫面上的歌詞行
   cjk.js                        日文字元判定、未轉換字的偵測
   reading.js                    讀音格式驗證與羅馬拼音轉假名
   corrections.js                內建讀音修正字典(純邏輯,不相依 chrome)
@@ -520,6 +524,23 @@ const s = document.querySelector('ytmusic-description-shelf-renderer[page-type="
 
 以擴充功能開啟時,兩份本文皆會帶 `data-romaji-ytm-native` 而不可見;若 shelf 下方仍看得到一份日文原文,即表示其中一份未被標記。
 
+## LRCLIB 的版本挑選
+
+同一首歌在 LRCLIB 常有數十筆條目(不同專輯、Live 版、純日文版、對照翻譯版、羅馬拼音版)。挑錯的後果不是「沒有歌詞」,而是「顯示了看起來正常、卻對不上的歌詞」。挑選規則集中於 `shared/pick-lyrics.js`,`service-worker.js` 只負責查詢與快取。
+
+| 情況 | 挑法 |
+|---|---|
+| 沒有參考歌詞(Spotify 備援:畫面上本來就沒有歌詞) | 先以曲目長度 ±3 秒篩選,再取有時間軸者,同樣有時間軸時取日文行比例最高者 |
+| 有參考歌詞(YouTube Music:畫面上已有歌詞,只缺時間軸) | 同樣先篩長度,再以字元對齊逐筆比對內容,取相符度最高者,並回傳對齊後每一行的時間 |
+
+**依內容挑選的必要性**(實測 2026-09):YouTube Music 顯示的歌手名可能是英文或翻譯名(`Kenshi Yonezu`、`愛繆`、`Remioromen`),該名稱下的 LRCLIB 條目可能全是羅馬拼音版。依日文比例挑會挑到拼音版 —— 時間軸對得上,文字卻與畫面完全不同。
+
+**挑不到相符內容時以曲名重查一次。** 曲名通常仍為原文,Lemon 以曲名重查後相符度由 0% 變為 99%。僅在有參考歌詞時重查:沒有參考歌詞就無從判斷重查的結果是否更好,多送一次請求只是增加 LRCLIB 的負擔。
+
+**快取以參考歌詞區分。** 「依內容挑出的版本」與「依中繼資料挑出的版本」是兩個不同的答案,共用同一格會使先到的那一種佔住快取,另一種在七天內都拿到錯的版本。快取格式版本因此推進至 v4,舊資料自動作廢重抓。
+
+**沒有參考歌詞時,回應的欄位維持原樣。** 該路徑已在使用中,多出來的欄位對它毫無意義;而「回應完全相同」才能以快照逐欄位比對,確認改動沒有波及 Spotify 的備援(實測 10 項查詢全部相同)。
+
 ## 同步高亮
 
 高亮不由觀察 Spotify 畫面推斷。該方式先天延遲,且無法取得句子內部的進度。改以播放時間推算:
@@ -560,7 +581,7 @@ LRCLIB 與畫面歌詞的比對低於 50%(版本不同、Live 版)即整組放�
 每次改動均須執行下列三項,順序不可調換:
 
 ```bash
-npm test               # 純函式測試(221 項)
+npm test               # 純函式測試(254 項)
 npm run check:imports  # 遺漏 import 的靜態掃描
 npm run build          # src/ → dist/
 ```
@@ -604,6 +625,9 @@ esbuild 對未定義的全域識別字不報錯,建置階段無法攔截。以 v
 | `apply-reading.test.js` | issue 內容解析、寫入字典、以驗證器覆核 |
 | `ytmusic-lyrics.test.js` | YouTube Music 歌詞拆解(`\r\n`、段落、空白)、曲目判定(廣告不算) |
 | `lyrics-button.test.js` | Spotify 歌詞按鈕狀態:無歌詞(disabled)不算使用者關閉、按壓命中判斷 |
+| `char-diff.test.js` | 字元對應等於最長共同子序列、對應遞增、提前放棄不誤殺 |
+| `lyrics-align.test.js` | 斷行合併與拆開、行中內插、用字差異、挑錯版本即放棄 |
+| `pick-lyrics.test.js` | 無參考歌詞時與既有規則相同、依內容挑選避開拼音版、對不上時不給時間 |
 
 測試本身以注入已知錯誤的方式驗證過:
 
