@@ -75,6 +75,7 @@ import {
   isLyricsViewClosedByUser,
   isPressOnUnavailableButton,
 } from './lyrics-button.js';
+import { getYtmPositionMs, getYtmDurationMs } from './ytmusic-clock.js';
 import {
   DEFAULTS,
   getSettings,
@@ -1040,12 +1041,17 @@ function nextTimeAfter(index) {
  *
  * 合併為一支之後,「要查詢什麼」只寫一次,不可能再分岔。
  */
-function askForLyrics(nowPlaying) {
-  const durationMs = getDurationMs();
+function askForLyrics(nowPlaying, lines) {
+  // 曲目長度的來源依平台而異:Spotify 只能由進度文字推得(playback-clock.js),
+  // YouTube Music 則有播放器 API
+  const durationMs = ON_YTMUSIC ? getYtmDurationMs() : getDurationMs();
   return chrome.runtime.sendMessage({
     type: 'FETCH_LYRICS',
     ...nowPlaying,
     durationSec: durationMs ? Math.round(durationMs / 1000) : undefined,
+    // 畫面上已有歌詞時一併送出:service worker 會據此挑出內容相符的版本,
+    // 並回傳與這些行一一對應的時間(見 shared/pick-lyrics.js)
+    ...(lines?.length ? { lines } : {}),
   });
 }
 
@@ -1076,6 +1082,72 @@ async function requestLrc(nowPlaying, key) {
 
     pendingLrc = parsed.lines;
     alignedCount = 0; // 迫使下一輪重新對齊
+  } catch (err) {
+    console.warn(`${LOG} 取得時間軸失敗:`, err);
+    lrcAskedFor = null;
+  }
+}
+
+/**
+ * YouTube Music:向 service worker 索取時間軸,並直接套用。
+ *
+ * 與 Spotify 的 requestLrc 有兩點不同:
+ *
+ * 1. 一併送出畫面上的歌詞行。YouTube Music 自己的歌詞沒有時間軸,而 LRCLIB 的
+ *    同一首歌斷行方式往往不同,逐句比對對不起來 —— 改由 service worker 以字元對齊
+ *    比對內容、挑出相符的版本,並回傳與這些行一一對應的時間(見 shared/pick-lyrics.js)
+ * 2. 回來的時間已經是對齊好的,毋須 alignIfNeeded。那一步是為了把 LRC 的句子
+ *    對應到畫面的行,此處在 service worker 端就做完了
+ *
+ * 對不上時 times 為 null,即維持沒有高亮的狀態並說明原因 ——
+ * 延續「對齊失敗時不強行套用」的原則。
+ */
+async function requestYtmTimeline(nowPlaying, key, lineEls) {
+  if (lrcAskedFor === key) return;
+  lrcAskedFor = key;
+
+  const texts = lineEls.map(readLineText);
+
+  try {
+    const res = await askForLyrics(nowPlaying, texts);
+
+    if (res?.timedOut) {
+      lrcAskedFor = null; // 逾時不算查詢過,下次仍可再試
+      return;
+    }
+
+    // 換歌了:這份時間軸屬於上一首,套上去會整份錯位
+    if (key !== currentTrackKey) return;
+
+    if (!res?.times?.length) {
+      console.info(
+        `${LOG} 沒有可用的時間軸(${res?.synced ? '內容與畫面上的歌詞對不上' : 'LRCLIB 沒有同步歌詞'}),不做高亮`
+      );
+      noticeNoTimeline(
+        res?.synced ? '這首歌的同步歌詞對不上' : '這首歌沒有同步歌詞',
+        '拼音照常顯示,但不會跟著歌聲逐字亮。\n設定裡的「延遲校正」拖了也不會有變化。'
+      );
+      return;
+    }
+
+    /*
+     * 行數必須與當下畫面上的行一致。
+     *
+     * 查詢期間使用者可能已經換歌,或歌詞區塊被重建成另一組行 ——
+     * 行數不符時套用會使時間與句子錯開,而錯位的高亮比沒有高亮更糟。
+     */
+    const current = getYtmLineElements();
+    if (current.length !== res.times.length) {
+      lrcAskedFor = null; // 下一輪 tick 會以新的行重新查詢
+      return;
+    }
+
+    setLineTimes(fillGaps(res.times));
+    lineCurves = []; // 逐字時間軸尚未支援,句內進度依句距估算
+    console.info(
+      `${LOG} 時間軸已對齊(相符度 ${Math.round((res.coverage ?? 0) * 100)}%,` +
+        `${res.pickedBy === 'content' ? '依內容挑選' : '依中繼資料挑選'}${res.cached ? ',快取' : ''})`
+    );
   } catch (err) {
     console.warn(`${LOG} 取得時間軸失敗:`, err);
     lrcAskedFor = null;
@@ -1157,6 +1229,11 @@ function countRomajiLetters(lineEl) {
  */
 function updateActiveLine() {
   if (!isEnabled()) return;
+
+  if (ON_YTMUSIC) {
+    updateYtmActiveLine();
+    return;
+  }
 
   const lines = [...document.querySelectorAll(LINE_SELECTOR)];
 
@@ -1250,6 +1327,59 @@ function updateActiveLine() {
    * 觀察畫面判斷正在演唱哪一行的,而其中一項策略即是「何者最接近畫面中央」——
    * 在該路徑上自動置中會成為自問自答。具備獨立的時間來源時才有資格介入捲動。
    */
+  if (active >= 0) centerActiveLine(lines[active]);
+}
+
+/**
+ * YouTube Music 的高亮。
+ *
+ * 與 Spotify 的差別僅在三處,其餘(逐句標記、逐字掃描、自動置中)完全共用:
+ *
+ * 1. 行來自自建的容器,不是 Spotify 的歌詞行
+ * 2. 播放位置直接讀播放器 API,毋須估算(見 ytmusic-clock.js)
+ * 3. 沒有「觀察畫面」的退路 —— YouTube Music 的歌詞是純文字,沒有原生高亮可觀察。
+ *    拿不到時間軸就完全不標記,而不是退回去猜
+ */
+function updateYtmActiveLine() {
+  const lines = getYtmLineElements();
+  if (!lines.length) return;
+
+  const raw = lineTimes ? getYtmPositionMs() : null;
+  if (raw === null) {
+    // 沒有時間軸,或正在播廣告:清掉既有標記,不要讓高亮停在最後一句
+    if (lines.some((el) => el.dataset.romajiActive)) {
+      for (const el of lines) {
+        delete el.dataset.romajiActive;
+        paintSweep(el, null);
+      }
+    }
+    return;
+  }
+
+  const position = raw + settings.syncOffsetMs;
+  const active = activeIndexAt(lineTimes, position);
+
+  let progress = null;
+  if (active >= 0) {
+    // 逐字時間軸尚未支援(字元對齊只給得出句首時間),一律依句距估算。
+    // 兩個參數的用途是限制誤差幅度,而非提高精度 —— 理由見上方 SWEEP_SPAN_FACTOR。
+    const letters = countRomajiLetters(lines[active]);
+    progress = progressAt(lineTimes, active, position, {
+      spanFactor: SWEEP_SPAN_FACTOR,
+      maxSpanMs: letters ? letters * settings.sweepMsPerLetter : Infinity,
+    });
+  }
+
+  lines.forEach((el, i) => {
+    if (i === active) {
+      if (el.dataset.romajiActive !== 'true') el.dataset.romajiActive = 'true';
+      paintSweep(el, progress);
+    } else {
+      if (el.dataset.romajiActive) delete el.dataset.romajiActive;
+      paintSweep(el, null);
+    }
+  });
+
   if (active >= 0) centerActiveLine(lines[active]);
 }
 
@@ -1413,9 +1543,17 @@ function tick() {
    * 其選擇器在 YouTube Music 上一個都不存在。放著讓它執行目前不會出錯
    * (找不到按鈕 → 視為檢視未開啟 → 什麼都不做),但那是碰巧無害而非設計如此 ——
    * 日後調整那段的退路判斷,YouTube Music 就可能莫名開始向 LRCLIB 查詢。
-   * 備援屬於 Phase 2 之後的範圍,在此明確擋下。
+   *
+   * 自己的時間軸在此處理:歌詞行已拆好、且確定播的是這一首時才查詢。
+   * 拆解在上方的 scanNow() 內完成,故此處拿得到行。
    */
-  if (ON_YTMUSIC) return;
+  if (ON_YTMUSIC) {
+    const ytmLines = getYtmLineElements();
+    if (trackKey && nowPlaying && ytmLines.length) {
+      requestYtmTimeline(nowPlaying, trackKey, ytmLines);
+    }
+    return;
+  }
 
   const lineCount = document.querySelectorAll(LINE_SELECTOR).length;
 
@@ -1554,10 +1692,8 @@ function startWatching() {
   // 高亮須另以較快的節奏更新。
   // 掛在 tick(1 秒)上的話,平均會慢半秒才換行 —— 跟唱時十分明顯。
   // 這個迴圈只做標記、不做轉換,成本很低(而且 findActiveIndex 內部還有快取)。
-  //
-  // YouTube Music 不啟動:Phase 1 沒有高亮,這個迴圈每 80ms 查一次 Spotify 的
-  // 歌詞行、查不到便返回,純屬空轉。
-  if (!ON_YTMUSIC) timers.push(setInterval(updateActiveLine, ACTIVE_TICK_MS));
+  // 兩個平台皆需要:YouTube Music 的高亮同樣由此驅動(見 updateYtmActiveLine)。
+  timers.push(setInterval(updateActiveLine, ACTIVE_TICK_MS));
 
   tick();
   timers.push(setInterval(tick, TICK_MS));

@@ -7,7 +7,7 @@
 ```bash
 npm install
 npm run build          # 打包至 dist/
-npm test               # 254 項純函式測試
+npm test               # 260 項純函式測試
 ```
 
 於 `chrome://extensions` 啟用開發人員模式,點選「載入未封裝項目」並選擇 `dist/`。
@@ -73,6 +73,7 @@ src/content/
   lrc-panel.js                  LRCLIB 歌詞浮動面板
   lyrics-button.js              Spotify 歌詞按鈕的狀態判讀(開啟、關閉、無歌詞)
   ytmusic-lyrics.js             YouTube Music 歌詞分頁的逐句拆解與掛載
+  ytmusic-clock.js              YouTube Music 的播放進度(播放器 API,含廣告偵測)
   drag-bounds.js                面板位置的邊界夾制
   notice.js                     畫面角落的暫時提示
   overlay.css                   拼音外觀、顯示模式、面板樣式
@@ -466,7 +467,31 @@ document.querySelector('[data-testid="lyrics-line"]').innerHTML;
 
 ## YouTube Music 支援
 
-目前為 Phase 1:偵測歌詞分頁、拆成逐句、插入拼音,四種顯示模式、手動斷字與修正面板皆可使用。**不做**同步高亮、時間軸與 LRCLIB 備援。規劃見 `docs/youtube-music-support-plan.md`。
+偵測歌詞分頁、拆成逐句、插入拼音,四種顯示模式、手動斷字與修正面板皆可使用(Phase 1);同步高亮改由 LRCLIB 的時間軸驅動(Phase 2)。**不做**「YouTube Music 沒有歌詞時改用 LRCLIB 的文字」——那是 Spotify 備援的範圍。規劃見 `docs/youtube-music-support-plan.md`。
+
+### 同步高亮(Phase 2)
+
+YouTube Music 自己的歌詞沒有時間軸(Musixmatch 與 LyricFind 皆無),時間軸另向 LRCLIB 取得,文字仍用畫面上那一份。
+
+```
+畫面上的歌詞行 ─┐
+                ├→ service worker:依內容挑版本 + 字元對齊 → 每一行的時間
+LRCLIB 的候選 ──┘
+#movie_player.getCurrentTime() → 目前毫秒 → 目前句次 + 句內進度 → paintSweep
+```
+
+| 項目 | 作法 |
+|---|---|
+| 播放進度 | `ytmusic-clock.js` 讀 `<video>` 的 `currentTime`(浮點秒),毋須 `playback-clock.js` 的估算 |
+| 廣告 | 廣告期間 `<video>` 播的是廣告,`currentTime` 自 0 起算,高亮會跳回開頭。以 `#movie_player` 的 class 是否含 `ad-showing` / `ad-interrupting` 判斷,是則回傳 null、清除高亮 |
+| 對齊 | 由 service worker 完成(見「LRCLIB 的版本挑選」),content script 拿到的已是與畫面行一一對應的時間,毋須 `alignLrc` |
+| 對不上 | 不標記任何一行,並顯示提示。沒有「觀察畫面」的退路 —— 畫面上是純文字,沒有原生高亮可觀察 |
+| 逐字掃描 | 句內進度依句距估算。字元對齊只給得出句首時間,逐字時間軸尚未支援 |
+| 行數變動 | 查詢期間歌詞區塊可能被重建,回來時行數不符即放棄套用,由下一輪重新查詢 |
+
+**規劃書中的 `#movie_player.getCurrentTime()` 不可用。** 該 API 屬於頁面的主世界,content script 執行於 isolated world,看不見頁面掛在元素上的自訂方法 —— 實測 `typeof getCurrentTime` 為 `undefined`(規劃書那行驗證是在 DevTools 主控台做的,主控台屬於主世界)。`<video>` 的 `currentTime` 則是標準 DOM 屬性,兩個世界皆可讀,精度相同。
+
+**廣告的判斷不可放寬為 `ad-` 開頭。** `ad-created` 代表「本次工作階段曾播過廣告」,歌曲播放時仍然留著;放寬之後,只要播過一次廣告,整首歌都會被判定為廣告而沒有高亮。「廣告元素是否存在於 DOM」同樣不可用,那些元素在歌曲期間也還在,只是隱藏。
 
 ### 實測結論(2026-09,headless Chrome,未登入)
 
@@ -581,7 +606,7 @@ LRCLIB 與畫面歌詞的比對低於 50%(版本不同、Live 版)即整組放�
 每次改動均須執行下列三項,順序不可調換:
 
 ```bash
-npm test               # 純函式測試(254 項)
+npm test               # 純函式測試(260 項)
 npm run check:imports  # 遺漏 import 的靜態掃描
 npm run build          # src/ → dist/
 ```
@@ -624,6 +649,7 @@ esbuild 對未定義的全域識別字不報錯,建置階段無法攔截。以 v
 | `shared-dictionary.test.js` | 共用字典驗證,含限定單曲的條目 |
 | `apply-reading.test.js` | issue 內容解析、寫入字典、以驗證器覆核 |
 | `ytmusic-lyrics.test.js` | YouTube Music 歌詞拆解(`\r\n`、段落、空白)、曲目判定(廣告不算) |
+| `ytmusic-clock.test.js` | 網址解析、秒轉毫秒的防呆、廣告期間不採用播放進度 |
 | `lyrics-button.test.js` | Spotify 歌詞按鈕狀態:無歌詞(disabled)不算使用者關閉、按壓命中判斷 |
 | `char-diff.test.js` | 字元對應等於最長共同子序列、對應遞增、提前放棄不誤殺 |
 | `lyrics-align.test.js` | 斷行合併與拆開、行中內插、用字差異、挑錯版本即放棄 |

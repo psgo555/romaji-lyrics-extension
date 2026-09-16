@@ -908,13 +908,43 @@ html[data-romaji-mode='romaji-only'] .romaji-ytm-line[data-romaji-paragraph='sta
 }
 
 /*
- * 純拼音模式不淡化。
+ * 沒有時間軸時,純拼音模式不淡化。
  *
  * 上方「未在演唱的行」將拼音壓到 0.32,前提是有一行正在演唱並亮起。
- * YouTube Music 目前沒有高亮(Phase 1),沒有任何一行會亮 ——
+ * 拿不到時間軸的曲目(LRCLIB 沒有,或內容對不上)沒有任何一行會亮,
  * 不覆蓋的話整份歌詞都是暗的,看起來像是整片失效。
+ *
+ * data-romaji-synced 由 index.js 的 setLineTimes 統一維護,
+ * 取得時間軸後這條規則即失效,恢復「未演唱淡化、演唱中亮起」。
  * 特異性 (0,4,1) 高於被覆蓋的 (0,3,1)。
  */
-html[data-romaji-mode='romaji-only'] .romaji-ytm-line[data-romaji-processed] .romaji-overlay {
+html[data-romaji-mode='romaji-only']:not([data-romaji-synced])
+  .romaji-ytm-line[data-romaji-processed]
+  .romaji-overlay {
   opacity: 1;
+}
+
+/*
+ * 演唱中的那一行,原文也要跟著亮。
+ *
+ * YouTube Music 的原文與 Spotify 不同,是本擴充功能自己畫的(見 ytmusic-lyrics.js),
+ * 沒有任何原生高亮可用。不自行標示的話,「日 + 拼音」與假名模式下只有拼音會變色,
+ * 原文整片同色,反而比純拼音模式更難找到目前唱到哪一句。
+ *
+ * 僅在有時間軸時生效:沒有時間軸就沒有任何一行會亮,淡化只會讓整片變暗。
+ */
+html[data-romaji-synced] .romaji-ytm-line .romaji-original {
+  opacity: 0.55;
+  transition: opacity 0.15s ease, color 0.15s ease;
+}
+
+html[data-romaji-synced] .romaji-ytm-line[data-romaji-active='true'] .romaji-original {
+  opacity: 1;
+  color: #fff;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-romaji-synced] .romaji-ytm-line .romaji-original {
+    transition: none;
+  }
 }
