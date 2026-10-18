@@ -847,9 +847,8 @@ function onRomajiKeyEcho(event) {
 }
 
 function registerSplitInteractions() {
-  // 全部以捕獲階段委派於 document 上:
-  // Spotify 會不斷重建歌詞行,掛在個別元素上的 listener 會隨之被丟棄;
-  // 且唯有捕獲階段才能搶在 Spotify 自身的點擊與快捷鍵處理之前。
+  // 全部以捕獲階段委派,不綁在個別元素上:
+  // Spotify 會不斷重建歌詞行,掛在個別元素上的 listener 會隨之被丟棄。
   document.addEventListener(
     'mousedown',
     () => {
@@ -864,9 +863,18 @@ function registerSplitInteractions() {
   document.addEventListener('dblclick', onRomajiDblClick, true);
   document.addEventListener('focusin', onRomajiFocusIn, true);
   document.addEventListener('focusout', onRomajiFocusOut, true);
-  document.addEventListener('keydown', onRomajiKeydown, true);
-  document.addEventListener('keypress', onRomajiKeyEcho, true);
-  document.addEventListener('keyup', onRomajiKeyEcho, true);
+
+  /*
+   * 按鍵三件掛在 window 而非 document。
+   *
+   * 捕獲階段由 window 先於 document 走訪 —— Spotify 自身的播放/暫停等快捷鍵
+   * 若也掛在 document 的捕獲階段(甚至掛在 document 卻呼叫
+   * stopPropagation),掛在 document 上會讓事件在抵達這裡之前就被攔截或
+   * 吃掉,空白鍵因而「按了沒反應」。掛在 window 上可搶在其前面攔下。
+   */
+  window.addEventListener('keydown', onRomajiKeydown, true);
+  window.addEventListener('keypress', onRomajiKeyEcho, true);
+  window.addEventListener('keyup', onRomajiKeyEcho, true);
 
   // 按住按鍵切換至其他視窗時會收不到 keyup,那顆鍵會卡在集合中。
   // 回來時清除,避免下一次按下它被莫名攔下一次。
